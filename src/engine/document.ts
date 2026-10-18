@@ -6,7 +6,7 @@ export const A4_HEIGHT = 1123;
 
 export function createNewPage(
   pageNumber: number,
-  template: PageTemplate = 'ruled',
+  template: PageTemplate = 'grid',
   theme: PaperTheme = 'white'
 ): Page {
   return {
@@ -21,8 +21,8 @@ export function createNewPage(
   };
 }
 
-export function createDefaultNotebook(title: string = 'Mi Cuaderno OS Notes'): NotebookDocument {
-  const firstPage = createNewPage(1, 'ruled', 'white');
+export function createDefaultNotebook(title: string = 'Sin título (borrador)'): NotebookDocument {
+  const firstPage = createNewPage(1, 'grid', 'white');
   return {
     id: `osnotes-${Date.now()}`,
     title,

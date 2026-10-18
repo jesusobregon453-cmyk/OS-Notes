@@ -41,6 +41,7 @@ export async function getAllNotebookSummaries(): Promise<NotebookSummary[]> {
         pageCount: doc.pages.length,
         createdAt: doc.createdAt,
         updatedAt: doc.updatedAt,
+        isFavorite: !!doc.isFavorite,
       }));
       // Sort newest first
       summaries.sort((a, b) => b.updatedAt - a.updatedAt);
@@ -49,6 +50,17 @@ export async function getAllNotebookSummaries(): Promise<NotebookSummary[]> {
 
     request.onerror = () => reject(request.error);
   });
+}
+
+/**
+ * Toggles the favorite status of a notebook
+ */
+export async function toggleNotebookFavoriteInDB(id: string): Promise<boolean> {
+  const doc = await loadNotebookById(id);
+  if (!doc) return false;
+  doc.isFavorite = !doc.isFavorite;
+  await saveNotebookToDB(doc);
+  return doc.isFavorite;
 }
 
 /**

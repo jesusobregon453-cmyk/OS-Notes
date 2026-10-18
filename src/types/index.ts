@@ -138,6 +138,7 @@ export interface NotebookSummary {
   pageCount: number;
   createdAt: number;
   updatedAt: number;
+  isFavorite?: boolean;
 }
 
 export interface NotebookDocument {
@@ -147,6 +148,7 @@ export interface NotebookDocument {
   canvasMode: CanvasMode;
   createdAt: number;
   updatedAt: number;
+  isFavorite?: boolean;
   pages: Page[];
 }
 
