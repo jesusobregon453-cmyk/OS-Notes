@@ -27,6 +27,12 @@ import {
   ChevronLeft as BackIcon,
   Feather,
   CheckCircle2,
+  Bookmark,
+  Sparkles,
+  Type,
+  Eye,
+  Pen,
+  Spline,
 } from 'lucide-react';
 import type { ToolType, PageTemplate, PaperTheme, ViewportState, CanvasMode, AudioRecordingState } from '../types';
 
@@ -35,6 +41,11 @@ interface ToolbarProps {
   onTitleChange: (newTitle: string) => void;
   onBackToLibrary: () => void;
   onOpenPageManager: () => void;
+  onOpenElementsModal: () => void;
+  isBookmarked: boolean;
+  onToggleBookmark: () => void;
+  isReadOnly: boolean;
+  onToggleReadOnly: () => void;
   currentTool: ToolType;
   onSelectTool: (tool: ToolType) => void;
   currentColor: string;
@@ -95,6 +106,11 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onTitleChange,
   onBackToLibrary,
   onOpenPageManager,
+  onOpenElementsModal,
+  isBookmarked,
+  onToggleBookmark,
+  isReadOnly,
+  onToggleReadOnly,
   currentTool,
   onSelectTool,
   currentColor,
@@ -157,7 +173,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               type="text"
               value={title}
               onChange={(e) => onTitleChange(e.target.value)}
-              className="font-medium text-sm text-slate-100 bg-slate-800/60 hover:bg-slate-800 focus:bg-slate-800 border border-transparent focus:border-indigo-500/50 rounded px-2.5 py-0.5 outline-none transition max-w-[200px]"
+              className="font-medium text-sm text-slate-100 bg-slate-800/60 hover:bg-slate-800 focus:bg-slate-800 border border-transparent focus:border-indigo-500/50 rounded px-2.5 py-0.5 outline-none transition max-w-[190px]"
             />
             <div className="flex items-center space-x-1 text-[11px] text-slate-400">
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
@@ -199,7 +215,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           </select>
         </div>
 
-        {/* Center: Audio Sync Recorder & Page Controls */}
+        {/* Center: Audio Sync Recorder & Page Controls with Bookmark */}
         <div className="flex items-center space-x-3">
           {/* Audio Recorder */}
           <div className="flex items-center space-x-2 bg-slate-800/90 px-3 py-1 rounded-full border border-slate-700/60 text-xs">
@@ -241,7 +257,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             )}
           </div>
 
-          {/* Page Navigator with Thumbnail Grid Button */}
+          {/* Page Navigator with Bookmark Ribbon & Thumbnail Grid */}
           <div className="flex items-center space-x-1 bg-slate-800 px-2 py-1 rounded-full text-xs font-medium text-slate-300 border border-slate-700/60">
             <button
               onClick={onOpenPageManager}
@@ -250,7 +266,22 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             >
               <LayoutGrid className="w-3.5 h-3.5" />
             </button>
+
+            {/* Bookmark ribbon button */}
+            <button
+              onClick={onToggleBookmark}
+              className={`p-1 rounded transition ${
+                isBookmarked
+                  ? 'text-rose-500 hover:text-rose-400'
+                  : 'text-slate-500 hover:text-slate-300'
+              }`}
+              title={isBookmarked ? 'Quitar de Favoritos' : 'Añadir a Favoritos'}
+            >
+              <Bookmark className={`w-3.5 h-3.5 ${isBookmarked ? 'fill-current' : ''}`} />
+            </button>
+
             <div className="h-3 w-px bg-slate-700" />
+
             <button
               onClick={onPrevPage}
               disabled={currentPageIndex === 0}
@@ -280,11 +311,27 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           </div>
         </div>
 
-        {/* Right Actions: Undo/Redo, Zoom, Export */}
+        {/* Right Actions: Read-Only Toggle, Undo/Redo, Zoom, Export */}
         <div className="flex items-center space-x-2">
+          {/* Read-Only Mode vs Edit Mode Toggle (Classic Goodnotes feature) */}
+          <button
+            onClick={onToggleReadOnly}
+            className={`flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition ${
+              isReadOnly
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
+                : 'bg-indigo-600/20 text-indigo-300 border border-indigo-500/40 hover:bg-indigo-600/30'
+            }`}
+            title={isReadOnly ? 'Cambiar a Modo Edición' : 'Cambiar a Modo Lectura (Bloquea trazos y activa hipervínculos/cinta)'}
+          >
+            {isReadOnly ? <Eye className="w-3.5 h-3.5" /> : <Pen className="w-3.5 h-3.5" />}
+            <span>{isReadOnly ? 'Modo Lectura' : 'Modo Edición'}</span>
+          </button>
+
+          <div className="h-4 w-px bg-slate-700" />
+
           <button
             onClick={onUndo}
-            disabled={!canUndo}
+            disabled={!canUndo || isReadOnly}
             className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-slate-200 disabled:opacity-30"
             title="Deshacer (Cmd+Z)"
           >
@@ -292,7 +339,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           </button>
           <button
             onClick={onRedo}
-            disabled={!canRedo}
+            disabled={!canRedo || isReadOnly}
             className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-slate-200 disabled:opacity-30"
             title="Rehacer (Cmd+Shift+Z)"
           >
@@ -353,211 +400,249 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </div>
       </div>
 
-      {/* Main Multi-Tool Inking Ribbon */}
-      <div className="flex items-center justify-between px-6 py-1.5 bg-slate-900/90 border-t border-slate-800/40">
-        <div className="flex items-center space-x-1.5">
-          {/* Fountain Pen */}
-          <button
-            onClick={() => onSelectTool('fountain')}
-            className={`flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
-              currentTool === 'fountain'
-                ? 'bg-indigo-600 text-white shadow-md'
-                : 'text-slate-300 hover:bg-slate-800'
-            }`}
-            title="Pluma estilográfica con flujo dinámico"
-          >
-            <PenTool className="w-3.5 h-3.5" />
-            <span>Estilográfica</span>
-          </button>
+      {/* Main Inking & Study Ribbon (Disabled in Read-Only Mode) */}
+      {!isReadOnly && (
+        <div className="flex items-center justify-between px-6 py-1.5 bg-slate-900/90 border-t border-slate-800/40">
+          <div className="flex items-center space-x-1.5">
+            {/* Fountain Pen */}
+            <button
+              onClick={() => onSelectTool('fountain')}
+              className={`flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
+                currentTool === 'fountain'
+                  ? 'bg-indigo-600 text-white shadow-md'
+                  : 'text-slate-300 hover:bg-slate-800'
+              }`}
+              title="Pluma estilográfica con flujo dinámico"
+            >
+              <PenTool className="w-3.5 h-3.5" />
+              <span>Estilográfica</span>
+            </button>
 
-          {/* Calligraphy Pen */}
-          <button
-            onClick={() => onSelectTool('calligraphy')}
-            className={`flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
-              currentTool === 'calligraphy'
-                ? 'bg-indigo-600 text-white shadow-md'
-                : 'text-slate-300 hover:bg-slate-800'
-            }`}
-            title="Pluma caligráfica (plumilla biselada a 40°)"
-          >
-            <Feather className="w-3.5 h-3.5" />
-            <span>Caligráfica</span>
-          </button>
+            {/* Calligraphy Pen */}
+            <button
+              onClick={() => onSelectTool('calligraphy')}
+              className={`flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
+                currentTool === 'calligraphy'
+                  ? 'bg-indigo-600 text-white shadow-md'
+                  : 'text-slate-300 hover:bg-slate-800'
+              }`}
+              title="Pluma caligráfica (plumilla biselada a 40°)"
+            >
+              <Feather className="w-3.5 h-3.5" />
+              <span>Caligráfica</span>
+            </button>
 
-          {/* Graphite Pencil */}
-          <button
-            onClick={() => onSelectTool('pencil')}
-            className={`flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
-              currentTool === 'pencil'
-                ? 'bg-indigo-600 text-white shadow-md'
-                : 'text-slate-300 hover:bg-slate-800'
-            }`}
-            title="Lápiz grafito (sensible al sombreado e inclinación)"
-          >
-            <Pencil className="w-3.5 h-3.5" />
-            <span>Lápiz</span>
-          </button>
+            {/* Graphite Pencil */}
+            <button
+              onClick={() => onSelectTool('pencil')}
+              className={`flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
+                currentTool === 'pencil'
+                  ? 'bg-indigo-600 text-white shadow-md'
+                  : 'text-slate-300 hover:bg-slate-800'
+              }`}
+              title="Lápiz grafito (sombreado e inclinación)"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+              <span>Lápiz</span>
+            </button>
 
-          {/* Ballpoint Pen */}
-          <button
-            onClick={() => onSelectTool('pen')}
-            className={`flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
-              currentTool === 'pen'
-                ? 'bg-indigo-600 text-white shadow-md'
-                : 'text-slate-300 hover:bg-slate-800'
-            }`}
-            title="Bolígrafo de trazo uniforme"
-          >
-            <span className="font-bold text-xs">●</span>
-            <span>Bolígrafo</span>
-          </button>
+            {/* Ballpoint Pen */}
+            <button
+              onClick={() => onSelectTool('pen')}
+              className={`flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
+                currentTool === 'pen'
+                  ? 'bg-indigo-600 text-white shadow-md'
+                  : 'text-slate-300 hover:bg-slate-800'
+              }`}
+              title="Bolígrafo de trazo uniforme"
+            >
+              <span className="font-bold text-xs">●</span>
+              <span>Bolígrafo</span>
+            </button>
 
-          {/* Highlighter */}
-          <button
-            onClick={() => onSelectTool('highlighter')}
-            className={`flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
-              currentTool === 'highlighter'
-                ? 'bg-amber-500 text-slate-950 font-semibold shadow-md'
-                : 'text-slate-300 hover:bg-slate-800'
-            }`}
-            title="Resaltador translúcido"
-          >
-            <Highlighter className="w-3.5 h-3.5" />
-            <span>Resaltador</span>
-          </button>
+            {/* Highlighter */}
+            <button
+              onClick={() => onSelectTool('highlighter')}
+              className={`flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
+                currentTool === 'highlighter'
+                  ? 'bg-amber-500 text-slate-950 font-semibold shadow-md'
+                  : 'text-slate-300 hover:bg-slate-800'
+              }`}
+              title="Resaltador translúcido"
+            >
+              <Highlighter className="w-3.5 h-3.5" />
+              <span>Resaltador</span>
+            </button>
 
-          {/* Smart Shape Snapper */}
-          <button
-            onClick={() => onSelectTool('shape')}
-            className={`flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
-              currentTool === 'shape'
-                ? 'bg-cyan-600 text-white shadow-md'
-                : 'text-slate-300 hover:bg-slate-800'
-            }`}
-            title="Reconocimiento geométrico inteligente"
-          >
-            <Shapes className="w-3.5 h-3.5" />
-            <span>Formas</span>
-          </button>
+            {/* Tape Tool (Goodnotes 6 Study Tape) */}
+            <button
+              onClick={() => onSelectTool('tape')}
+              className={`flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
+                currentTool === 'tape'
+                  ? 'bg-amber-400 text-slate-950 font-semibold shadow-md'
+                  : 'text-slate-300 hover:bg-slate-800'
+              }`}
+              title="Cinta de estudio: Tapa respuestas y pulsa para revelarlas"
+            >
+              <Spline className="w-3.5 h-3.5" />
+              <span>Cinta (Tape)</span>
+            </button>
 
-          {/* Laser Pointer */}
-          <button
-            onClick={() => onSelectTool('laser')}
-            className={`flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
-              currentTool === 'laser'
-                ? 'bg-rose-600 text-white shadow-md'
-                : 'text-slate-300 hover:bg-slate-800'
-            }`}
-            title="Puntero láser con estela"
-          >
-            <Crosshair className="w-3.5 h-3.5" />
-            <span>Láser</span>
-          </button>
+            {/* Text Tool */}
+            <button
+              onClick={() => onSelectTool('text')}
+              className={`flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
+                currentTool === 'text'
+                  ? 'bg-indigo-600 text-white shadow-md'
+                  : 'text-slate-300 hover:bg-slate-800'
+              }`}
+              title="Caja de texto para escribir a máquina"
+            >
+              <Type className="w-3.5 h-3.5" />
+              <span>Texto</span>
+            </button>
 
-          {/* Sticky Notes */}
-          <button
-            onClick={() => onSelectTool('sticky')}
-            className={`flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
-              currentTool === 'sticky'
-                ? 'bg-yellow-500 text-slate-950 font-semibold shadow-md'
-                : 'text-slate-300 hover:bg-slate-800'
-            }`}
-            title="Nota adhesiva"
-          >
-            <StickyIcon className="w-3.5 h-3.5" />
-            <span>Nota</span>
-          </button>
+            {/* Elements / Stickers Button */}
+            <button
+              onClick={onOpenElementsModal}
+              className="flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-indigo-300 bg-indigo-950/60 border border-indigo-700/60 hover:bg-indigo-900 transition"
+              title="Abrir colección de Elementos, Stickers y Sellos"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Elementos</span>
+            </button>
 
-          {/* Eraser */}
-          <button
-            onClick={() => onSelectTool('eraser')}
-            className={`flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
-              currentTool === 'eraser'
-                ? 'bg-rose-500 text-white shadow-md'
-                : 'text-slate-300 hover:bg-slate-800'
-            }`}
-            title="Borrador vectorial"
-          >
-            <Eraser className="w-3.5 h-3.5" />
-            <span>Borrador</span>
-          </button>
+            {/* Smart Shape Snapper */}
+            <button
+              onClick={() => onSelectTool('shape')}
+              className={`flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
+                currentTool === 'shape'
+                  ? 'bg-cyan-600 text-white shadow-md'
+                  : 'text-slate-300 hover:bg-slate-800'
+              }`}
+              title="Reconocimiento geométrico inteligente"
+            >
+              <Shapes className="w-3.5 h-3.5" />
+              <span>Formas</span>
+            </button>
 
-          {/* Lasso */}
-          <button
-            onClick={() => onSelectTool('lasso')}
-            className={`flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
-              currentTool === 'lasso'
-                ? 'bg-violet-600 text-white shadow-md'
-                : 'text-slate-300 hover:bg-slate-800'
-            }`}
-            title="Lazo de selección"
-          >
-            <span className="font-mono text-sm leading-none font-bold">☌</span>
-            <span>Lazo</span>
-          </button>
+            {/* Laser Pointer */}
+            <button
+              onClick={() => onSelectTool('laser')}
+              className={`flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
+                currentTool === 'laser'
+                  ? 'bg-rose-600 text-white shadow-md'
+                  : 'text-slate-300 hover:bg-slate-800'
+              }`}
+              title="Puntero láser con estela"
+            >
+              <Crosshair className="w-3.5 h-3.5" />
+              <span>Láser</span>
+            </button>
 
-          {/* Pan */}
-          <button
-            onClick={() => onSelectTool('pan')}
-            className={`flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
-              currentTool === 'pan'
-                ? 'bg-slate-700 text-white shadow-md'
-                : 'text-slate-300 hover:bg-slate-800'
-            }`}
-            title="Mover lienzo"
-          >
-            <Hand className="w-3.5 h-3.5" />
-            <span>Mover</span>
-          </button>
-        </div>
+            {/* Sticky Notes */}
+            <button
+              onClick={() => onSelectTool('sticky')}
+              className={`flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
+                currentTool === 'sticky'
+                  ? 'bg-yellow-500 text-slate-950 font-semibold shadow-md'
+                  : 'text-slate-300 hover:bg-slate-800'
+              }`}
+              title="Nota adhesiva"
+            >
+              <StickyIcon className="w-3.5 h-3.5" />
+              <span>Nota</span>
+            </button>
 
-        {/* Dynamic Color Palette & Stroke Width selector */}
-        {currentTool !== 'pan' && currentTool !== 'eraser' && currentTool !== 'laser' && currentTool !== 'sticky' && (
-          <div className="flex items-center space-x-4">
-            {/* Color Swatches */}
-            <div className="flex items-center space-x-1.5">
-              {activeColors.map((color) => (
-                <button
-                  key={color}
-                  onClick={() => onSelectColor(color)}
-                  className={`w-5 h-5 rounded-full border-2 transition transform ${
-                    currentColor === color
-                      ? 'scale-125 border-indigo-400 shadow-lg'
-                      : 'border-slate-700 hover:scale-110'
-                  }`}
-                  style={{ backgroundColor: color }}
-                  title={color}
-                />
-              ))}
-            </div>
+            {/* Eraser */}
+            <button
+              onClick={() => onSelectTool('eraser')}
+              className={`flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
+                currentTool === 'eraser'
+                  ? 'bg-rose-500 text-white shadow-md'
+                  : 'text-slate-300 hover:bg-slate-800'
+              }`}
+              title="Borrador vectorial"
+            >
+              <Eraser className="w-3.5 h-3.5" />
+              <span>Borrador</span>
+            </button>
 
-            <div className="h-4 w-px bg-slate-700" />
+            {/* Lasso */}
+            <button
+              onClick={() => onSelectTool('lasso')}
+              className={`flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
+                currentTool === 'lasso'
+                  ? 'bg-violet-600 text-white shadow-md'
+                  : 'text-slate-300 hover:bg-slate-800'
+              }`}
+              title="Lazo de selección"
+            >
+              <span className="font-mono text-sm leading-none font-bold">☌</span>
+              <span>Lazo</span>
+            </button>
 
-            {/* Stroke Width Selector */}
-            <div className="flex items-center space-x-1">
-              {activeWidths.map((w) => (
-                <button
-                  key={w}
-                  onClick={() => onSelectWidth(w)}
-                  className={`w-6 h-6 flex items-center justify-center rounded-md text-xs font-medium transition ${
-                    currentWidth === w
-                      ? 'bg-indigo-600 text-white shadow-md'
-                      : 'bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700'
-                  }`}
-                >
-                  <span
-                    className="rounded-full bg-current"
-                    style={{
-                      width: `${Math.min(14, Math.max(3, w * 0.8))}px`,
-                      height: `${Math.min(14, Math.max(3, w * 0.8))}px`,
-                    }}
-                  />
-                </button>
-              ))}
-            </div>
+            {/* Pan */}
+            <button
+              onClick={() => onSelectTool('pan')}
+              className={`flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
+                currentTool === 'pan'
+                  ? 'bg-slate-700 text-white shadow-md'
+                  : 'text-slate-300 hover:bg-slate-800'
+              }`}
+              title="Mover lienzo"
+            >
+              <Hand className="w-3.5 h-3.5" />
+              <span>Mover</span>
+            </button>
           </div>
-        )}
-      </div>
+
+          {/* Dynamic Color Palette & Stroke Width selector */}
+          {currentTool !== 'pan' && currentTool !== 'eraser' && currentTool !== 'laser' && currentTool !== 'sticky' && currentTool !== 'text' && (
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-1.5">
+                {activeColors.map((color) => (
+                  <button
+                    key={color}
+                    onClick={() => onSelectColor(color)}
+                    className={`w-5 h-5 rounded-full border-2 transition transform ${
+                      currentColor === color
+                        ? 'scale-125 border-indigo-400 shadow-lg'
+                        : 'border-slate-700 hover:scale-110'
+                    }`}
+                    style={{ backgroundColor: color }}
+                    title={color}
+                  />
+                ))}
+              </div>
+
+              <div className="h-4 w-px bg-slate-700" />
+
+              <div className="flex items-center space-x-1">
+                {activeWidths.map((w) => (
+                  <button
+                    key={w}
+                    onClick={() => onSelectWidth(w)}
+                    className={`w-6 h-6 flex items-center justify-center rounded-md text-xs font-medium transition ${
+                      currentWidth === w
+                        ? 'bg-indigo-600 text-white shadow-md'
+                        : 'bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700'
+                    }`}
+                  >
+                    <span
+                      className="rounded-full bg-current"
+                      style={{
+                        width: `${Math.min(14, Math.max(3, w * 0.8))}px`,
+                        height: `${Math.min(14, Math.max(3, w * 0.8))}px`,
+                      }}
+                    />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </header>
   );
 };

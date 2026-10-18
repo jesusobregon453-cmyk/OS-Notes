@@ -1,12 +1,14 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react';
-import type { Page, ToolType, Stroke, Point, ViewportState, BoundingBox } from '../types';
+import type { Page, ToolType, Stroke, Point, ViewportState, BoundingBox, TapeItem, TextBoxItem } from '../types';
 import { drawPageTemplate } from '../engine/templates';
 import { renderStroke, calculateStrokeBounds } from '../engine/inking';
 import { strokeIntersectsEraser } from '../engine/spatial';
 import { detectGeometricShape } from '../engine/shapes';
 import { LaserPointerEngine } from '../engine/laser';
 import { selectStrokesWithLasso, renderLassoOverlay } from '../engine/lasso';
+import { renderTape, isPointInTape, calculateTapeBounds } from '../engine/tape';
 import { StickyNotesLayer } from './StickyNotesLayer';
+import { TextBoxLayer } from './TextBoxLayer';
 import { LassoActionBar } from './LassoActionBar';
 
 interface CanvasProps {
@@ -17,9 +19,11 @@ interface CanvasProps {
   viewport: ViewportState;
   isAudioRecording: boolean;
   audioElapsed: number;
+  isReadOnly?: boolean;
   onPageUpdate: (updatedPage: Page) => void;
   onViewportChange: (viewport: ViewportState) => void;
   onAddStickyNoteAt?: (x: number, y: number) => void;
+  onSaveSelectionAsElement?: (strokes: Stroke[]) => void;
 }
 
 export const Canvas: React.FC<CanvasProps> = ({
@@ -30,9 +34,11 @@ export const Canvas: React.FC<CanvasProps> = ({
   viewport,
   isAudioRecording,
   audioElapsed,
+  isReadOnly = false,
   onPageUpdate,
   onViewportChange,
   onAddStickyNoteAt,
+  onSaveSelectionAsElement,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const bgCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -70,7 +76,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     drawPageTemplate(ctx, page.width, page.height, page.template, page.theme || 'white');
   }, [page.width, page.height, page.template, page.theme, dpr]);
 
-  // Render Static Strokes
+  // Render Static Strokes and Tapes
   const redrawStaticStrokes = useCallback(() => {
     const canvas = staticCanvasRef.current;
     if (!canvas) return;
@@ -82,16 +88,26 @@ export const Canvas: React.FC<CanvasProps> = ({
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.scale(dpr, dpr);
 
+    // 1. Render Highlighters
     const highlighters = page.strokes.filter((s) => s.tool === 'highlighter');
     const normalStrokes = page.strokes.filter((s) => s.tool !== 'highlighter');
 
     for (const stroke of highlighters) {
       renderStroke(ctx, stroke, 1.0);
     }
+
+    // 2. Render Normal Handwriting & Drawing Strokes
     for (const stroke of normalStrokes) {
       renderStroke(ctx, stroke, 1.0);
     }
-  }, [page.strokes, page.width, page.height, dpr]);
+
+    // 3. Render Study Tapes (above handwriting to conceal answers)
+    if (page.tapes) {
+      for (const tape of page.tapes) {
+        renderTape(ctx, tape, 1.0);
+      }
+    }
+  }, [page.strokes, page.tapes, page.width, page.height, dpr]);
 
   useEffect(() => {
     redrawStaticStrokes();
@@ -144,9 +160,62 @@ export const Canvas: React.FC<CanvasProps> = ({
 
     const { x, y } = screenToCanvas(e.clientX, e.clientY);
 
-    // Sticky Note placement tool
+    // Read-Only Mode interactions: Tap on Tape to reveal/conceal
+    if (isReadOnly) {
+      if (page.tapes && page.tapes.length > 0) {
+        const hitTape = page.tapes.find((t) => isPointInTape(x, y, t));
+        if (hitTape) {
+          const updatedTapes = page.tapes.map((t) =>
+            t.id === hitTape.id ? { ...t, isRevealed: !t.isRevealed } : t
+          );
+          onPageUpdate({ ...page, tapes: updatedTapes });
+          return;
+        }
+      }
+      // Otherwise in Read-Only mode, default to panning
+      isPanningRef.current = true;
+      panStartRef.current = {
+        x: e.clientX,
+        y: e.clientY,
+        ox: viewport.offsetX,
+        oy: viewport.offsetY,
+      };
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      return;
+    }
+
+    // Tap on Tape tool mode to toggle reveal
+    if (currentTool === 'tape' && page.tapes) {
+      const hitTape = page.tapes.find((t) => isPointInTape(x, y, t));
+      if (hitTape) {
+        const updatedTapes = page.tapes.map((t) =>
+          t.id === hitTape.id ? { ...t, isRevealed: !t.isRevealed } : t
+        );
+        onPageUpdate({ ...page, tapes: updatedTapes });
+        return;
+      }
+    }
+
+    // Sticky Note tool
     if (currentTool === 'sticky') {
       onAddStickyNoteAt?.(x, y);
+      return;
+    }
+
+    // Text Box tool: spawn a new text box at click position
+    if (currentTool === 'text') {
+      const newBox: TextBoxItem = {
+        id: `textbox-${Date.now()}`,
+        x: Math.max(10, x - 100),
+        y: Math.max(10, y - 20),
+        width: 240,
+        height: 60,
+        text: '',
+        fontSize: 16,
+        color: currentColor === '#f8fafc' ? '#f8fafc' : '#0f172a',
+      };
+      const boxes = [...(page.textBoxes || []), newBox];
+      onPageUpdate({ ...page, textBoxes: boxes });
       return;
     }
 
@@ -187,7 +256,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       return;
     }
 
-    // Normal drawing stroke
+    // Drawing stroke (Pen, Pencil, Calligraphy, Highlighter, Tape)
     activePointsRef.current = [{
       x,
       y,
@@ -245,7 +314,6 @@ export const Canvas: React.FC<CanvasProps> = ({
       return;
     }
 
-    // High frequency stylus coalesced events
     const coalescedEvents = (e.nativeEvent as any).getCoalescedEvents
       ? (e.nativeEvent as any).getCoalescedEvents()
       : [e.nativeEvent];
@@ -264,7 +332,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       });
     }
 
-    // Draw active stroke
+    // Active layer rendering
     const activeCanvas = activeCanvasRef.current;
     if (!activeCanvas) return;
     const ctx = activeCanvas.getContext('2d');
@@ -275,17 +343,28 @@ export const Canvas: React.FC<CanvasProps> = ({
     ctx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
     ctx.scale(dpr, dpr);
 
-    const tempStroke: Stroke = {
-      id: 'active',
-      tool: currentTool,
-      color: currentColor,
-      baseWidth: currentWidth,
-      opacity: currentTool === 'highlighter' ? 0.35 : 1.0,
-      points: activePointsRef.current,
-      bounds: { minX: 0, minY: 0, maxX: 0, maxY: 0 },
-    };
-
-    renderStroke(ctx, tempStroke, 1.0);
+    if (currentTool === 'tape') {
+      const tempTape: TapeItem = {
+        id: 'active-tape',
+        points: activePointsRef.current,
+        width: Math.max(22, currentWidth * 5),
+        color: currentColor === '#0f172a' ? '#fde047' : currentColor,
+        isRevealed: false,
+        bounds: { minX: 0, minY: 0, maxX: 0, maxY: 0 },
+      };
+      renderTape(ctx, tempTape, 1.0);
+    } else {
+      const tempStroke: Stroke = {
+        id: 'active',
+        tool: currentTool,
+        color: currentColor,
+        baseWidth: currentWidth,
+        opacity: currentTool === 'highlighter' ? 0.35 : 1.0,
+        points: activePointsRef.current,
+        bounds: { minX: 0, minY: 0, maxX: 0, maxY: 0 },
+      };
+      renderStroke(ctx, tempStroke, 1.0);
+    }
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
@@ -305,9 +384,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       (e.target as HTMLElement).releasePointerCapture(e.pointerId);
     } catch (_) {}
 
-    if (currentTool === 'laser') {
-      return;
-    }
+    if (currentTool === 'laser') return;
 
     if (currentTool === 'eraser') {
       clearOverlay();
@@ -323,27 +400,54 @@ export const Canvas: React.FC<CanvasProps> = ({
       return;
     }
 
-    let points = activePointsRef.current;
+    const points = activePointsRef.current;
     if (points.length === 0) return;
 
-    // Shape recognition (if tool is 'shape' or automatic detection)
+    // Handle Tape tool completion
+    if (currentTool === 'tape') {
+      const tapeWidth = Math.max(22, currentWidth * 5);
+      const newTape: TapeItem = {
+        id: `tape-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        points: [...points],
+        width: tapeWidth,
+        color: currentColor === '#0f172a' ? '#fde047' : currentColor,
+        isRevealed: false,
+        bounds: calculateTapeBounds(points, tapeWidth),
+      };
+
+      activePointsRef.current = [];
+      const activeCanvas = activeCanvasRef.current;
+      if (activeCanvas) {
+        const ctx = activeCanvas.getContext('2d');
+        if (ctx) ctx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
+      }
+
+      onPageUpdate({
+        ...page,
+        tapes: [...(page.tapes || []), newTape],
+      });
+      return;
+    }
+
+    // Geometric Shape Recognition
+    let finalPoints = points;
     let shapeType = undefined;
     if (currentTool === 'shape' || points.length > 10) {
       const detected = detectGeometricShape(points);
       if (detected.type !== 'none') {
-        points = detected.perfectPoints;
+        finalPoints = detected.perfectPoints;
         shapeType = detected.type;
       }
     }
 
-    const bounds = calculateStrokeBounds(points, currentWidth);
+    const bounds = calculateStrokeBounds(finalPoints, currentWidth);
     const newStroke: Stroke = {
       id: `stroke-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       tool: currentTool,
       color: currentColor,
       baseWidth: currentWidth,
       opacity: currentTool === 'highlighter' ? 0.35 : 1.0,
-      points: [...points],
+      points: [...finalPoints],
       bounds,
       shapeType,
       audioTimestamp: isAudioRecording ? audioElapsed : undefined,
@@ -365,11 +469,17 @@ export const Canvas: React.FC<CanvasProps> = ({
 
   const handleEraser = (x: number, y: number) => {
     const eraserRadius = currentWidth * 1.5;
-    const remaining = page.strokes.filter((s) => !strokeIntersectsEraser(s, x, y, eraserRadius));
-    if (remaining.length !== page.strokes.length) {
+    const remainingStrokes = page.strokes.filter((s) => !strokeIntersectsEraser(s, x, y, eraserRadius));
+    const remainingTapes = (page.tapes || []).filter((t) => !isPointInTape(x, y, t));
+
+    if (
+      remainingStrokes.length !== page.strokes.length ||
+      remainingTapes.length !== (page.tapes || []).length
+    ) {
       onPageUpdate({
         ...page,
-        strokes: remaining,
+        strokes: remainingStrokes,
+        tapes: remainingTapes,
       });
     }
   };
@@ -469,6 +579,16 @@ export const Canvas: React.FC<CanvasProps> = ({
     onPageUpdate({ ...page, strokes: updated });
   };
 
+  const handleLassoSaveElement = () => {
+    const selected = page.strokes.filter((s) => selectedStrokeIds.includes(s.id));
+    if (selected.length > 0) {
+      onSaveSelectionAsElement?.(selected);
+      setSelectedStrokeIds([]);
+      setSelectionBounds(null);
+      clearOverlay();
+    }
+  };
+
   const handleWheel = (e: React.WheelEvent) => {
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault();
@@ -500,35 +620,38 @@ export const Canvas: React.FC<CanvasProps> = ({
           width: `${page.width}px`,
           height: `${page.height}px`,
           transform: `translate(${viewport.offsetX}px, ${viewport.offsetY}px) scale(${viewport.zoom})`,
-          cursor:
-            currentTool === 'pan'
-              ? 'grab'
-              : currentTool === 'eraser'
-              ? 'none'
-              : currentTool === 'laser'
-              ? 'none'
-              : 'crosshair',
+          cursor: isReadOnly
+            ? 'default'
+            : currentTool === 'pan'
+            ? 'grab'
+            : currentTool === 'eraser'
+            ? 'none'
+            : currentTool === 'laser'
+            ? 'none'
+            : currentTool === 'text'
+            ? 'text'
+            : 'crosshair',
         }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerLeave={clearOverlay}
       >
-        {/* Layer 1: Background Template */}
+        {/* Layer 1: Background Paper Template */}
         <canvas
           ref={bgCanvasRef}
           className="absolute inset-0 pointer-events-none rounded-sm shadow-xl"
           style={{ width: `${page.width}px`, height: `${page.height}px` }}
         />
 
-        {/* Layer 2: Static Committed Strokes */}
+        {/* Layer 2: Static Committed Strokes and Tapes */}
         <canvas
           ref={staticCanvasRef}
           className="absolute inset-0 pointer-events-none"
           style={{ width: `${page.width}px`, height: `${page.height}px` }}
         />
 
-        {/* Layer 3: Active In-Flight Stroke */}
+        {/* Layer 3: Active In-Flight Stroke / Tape */}
         <canvas
           ref={activeCanvasRef}
           className="absolute inset-0 pointer-events-none"
@@ -542,7 +665,26 @@ export const Canvas: React.FC<CanvasProps> = ({
           style={{ width: `${page.width}px`, height: `${page.height}px` }}
         />
 
-        {/* Layer 5: Sticky Notes Overlay */}
+        {/* Layer 5: Text Boxes */}
+        {page.textBoxes && page.textBoxes.length > 0 && (
+          <TextBoxLayer
+            textBoxes={page.textBoxes}
+            scale={1.0}
+            isReadOnly={isReadOnly}
+            onUpdateTextBox={(updatedBox) => {
+              const boxes = (page.textBoxes || []).map((b) =>
+                b.id === updatedBox.id ? updatedBox : b
+              );
+              onPageUpdate({ ...page, textBoxes: boxes });
+            }}
+            onDeleteTextBox={(id) => {
+              const boxes = (page.textBoxes || []).filter((b) => b.id !== id);
+              onPageUpdate({ ...page, textBoxes: boxes });
+            }}
+          />
+        )}
+
+        {/* Layer 6: Sticky Notes Overlay */}
         {page.stickyNotes && page.stickyNotes.length > 0 && (
           <StickyNotesLayer
             notes={page.stickyNotes}
@@ -571,6 +713,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           onDuplicate={handleLassoDuplicate}
           onDelete={handleLassoDelete}
           onChangeWidth={handleLassoChangeWidth}
+          onSaveAsElement={handleLassoSaveElement}
           onClose={() => {
             setSelectedStrokeIds([]);
             setSelectionBounds(null);

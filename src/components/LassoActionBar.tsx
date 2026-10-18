@@ -1,5 +1,5 @@
 import React from 'react';
-import { Copy, Trash2, X, Plus, Minus } from 'lucide-react';
+import { Copy, Trash2, X, Plus, Minus, Sparkles } from 'lucide-react';
 import type { BoundingBox } from '../types';
 
 interface LassoActionBarProps {
@@ -10,6 +10,7 @@ interface LassoActionBarProps {
   onDuplicate: () => void;
   onDelete: () => void;
   onChangeWidth: (delta: number) => void;
+  onSaveAsElement?: () => void;
   onClose: () => void;
 }
 
@@ -23,6 +24,7 @@ export const LassoActionBar: React.FC<LassoActionBarProps> = ({
   onDuplicate,
   onDelete,
   onChangeWidth,
+  onSaveAsElement,
   onClose,
 }) => {
   // Position above the selection bounding box
@@ -73,6 +75,17 @@ export const LassoActionBar: React.FC<LassoActionBarProps> = ({
       >
         <Copy className="w-3.5 h-3.5" />
       </button>
+
+      {/* Save as Reusable Element */}
+      {onSaveAsElement && (
+        <button
+          onClick={onSaveAsElement}
+          className="p-1 hover:bg-indigo-900/60 rounded text-indigo-400 hover:text-indigo-200 transition"
+          title="Guardar como Elemento / Sticker reutilizable"
+        >
+          <Sparkles className="w-3.5 h-3.5" />
+        </button>
+      )}
 
       {/* Delete */}
       <button

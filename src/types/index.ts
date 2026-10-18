@@ -15,6 +15,8 @@ export type ToolType =
   | 'calligraphy'
   | 'pencil'
   | 'highlighter'
+  | 'tape'
+  | 'text'
   | 'eraser'
   | 'lasso'
   | 'laser'
@@ -79,6 +81,27 @@ export interface StickyNote {
   color: string;
 }
 
+export interface TapeItem {
+  id: string;
+  points: Point[];
+  width: number;
+  color: string;
+  isRevealed: boolean;
+  bounds: BoundingBox;
+}
+
+export interface TextBoxItem {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  text: string;
+  fontSize: number;
+  color: string;
+  backgroundColor?: string;
+}
+
 export interface Page {
   id: string;
   pageNumber: number;
@@ -86,8 +109,19 @@ export interface Page {
   height: number;
   template: PageTemplate;
   theme: PaperTheme;
+  isBookmarked?: boolean;
+  outlineTitle?: string;
   strokes: Stroke[];
   stickyNotes?: StickyNote[];
+  tapes?: TapeItem[];
+  textBoxes?: TextBoxItem[];
+}
+
+export interface SavedElement {
+  id: string;
+  title: string;
+  category: string;
+  strokes: Stroke[];
 }
 
 export interface NotebookCover {

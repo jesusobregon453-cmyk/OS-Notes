@@ -10,6 +10,7 @@ import type {
   AudioRecordingState,
   NotebookCover,
   NotebookSummary,
+  SavedElement,
 } from './types';
 import {
   createDefaultNotebook,
@@ -31,6 +32,9 @@ import { Toolbar } from './components/Toolbar';
 import { Canvas } from './components/Canvas';
 import { LibraryView } from './components/LibraryView';
 import { PageManagerModal } from './components/PageManagerModal';
+import { ElementsModal } from './components/ElementsModal';
+
+const USER_ELEMENTS_STORAGE_KEY = 'osnotes_user_saved_elements';
 
 export const App: React.FC = () => {
   const [viewMode, setViewMode] = useState<'library' | 'editor'>('library');
@@ -41,8 +45,29 @@ export const App: React.FC = () => {
   const [currentColor, setCurrentColor] = useState<string>('#0f172a');
   const [currentWidth, setCurrentWidth] = useState<number>(2.5);
   const [viewport, setViewport] = useState<ViewportState>({ zoom: 1.0, offsetX: 0, offsetY: 0 });
+  const [isReadOnly, setIsReadOnly] = useState<boolean>(false);
   const [isPageManagerOpen, setIsPageManagerOpen] = useState<boolean>(false);
+  const [isElementsModalOpen, setIsElementsModalOpen] = useState<boolean>(false);
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving'>('saved');
+
+  // User Saved Elements / Stickers
+  const [savedElements, setSavedElements] = useState<SavedElement[]>(() => {
+    try {
+      const raw = localStorage.getItem(USER_ELEMENTS_STORAGE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const saveElementsToStorage = (elements: SavedElement[]) => {
+    setSavedElements(elements);
+    try {
+      localStorage.setItem(USER_ELEMENTS_STORAGE_KEY, JSON.stringify(elements));
+    } catch (e) {
+      console.error('Error saving elements:', e);
+    }
+  };
 
   // Audio Sync State
   const [audioState, setAudioState] = useState<AudioRecordingState>({
@@ -70,7 +95,6 @@ export const App: React.FC = () => {
     try {
       const summaries = await getAllNotebookSummaries();
       if (summaries.length === 0) {
-        // Create initial default notebook
         const defaultDoc = createDefaultNotebook('Primer Cuaderno');
         await saveNotebookToDB(defaultDoc);
         const updated = await getAllNotebookSummaries();
@@ -199,6 +223,10 @@ export const App: React.FC = () => {
         setCurrentTool('pencil');
       } else if (e.key === 'h' && !e.metaKey && !e.ctrlKey) {
         setCurrentTool('highlighter');
+      } else if (e.key === 't' && !e.metaKey && !e.ctrlKey) {
+        setCurrentTool('tape');
+      } else if (e.key === 'x' && !e.metaKey && !e.ctrlKey) {
+        setCurrentTool('text');
       } else if (e.key === 's' && !e.metaKey && !e.ctrlKey) {
         setCurrentTool('shape');
       } else if (e.key === 'l' && !e.metaKey && !e.ctrlKey) {
@@ -269,6 +297,55 @@ export const App: React.FC = () => {
     }
   };
 
+  // Bookmark & Outline
+  const handleToggleBookmark = () => {
+    const isNowBookmarked = !currentPage.isBookmarked;
+    handlePageUpdate({ ...currentPage, isBookmarked: isNowBookmarked });
+  };
+
+  const handleToggleBookmarkAtIndex = (index: number) => {
+    const target = doc.pages[index];
+    const updated = { ...target, isBookmarked: !target.isBookmarked };
+    const nextPages = [...doc.pages];
+    nextPages[index] = updated;
+    setDoc((prev) => ({ ...prev, pages: nextPages }));
+  };
+
+  const handleUpdateOutlineTitle = (index: number, title: string) => {
+    const target = doc.pages[index];
+    const updated = { ...target, outlineTitle: title };
+    const nextPages = [...doc.pages];
+    nextPages[index] = updated;
+    setDoc((prev) => ({ ...prev, pages: nextPages }));
+  };
+
+  // Elements: Save selection as reusable element
+  const handleSaveSelectionAsElement = (selectedStrokes: Stroke[]) => {
+    const name = prompt('Nombre para este nuevo Elemento / Sello:') || 'Mi Elemento';
+    const newElement: SavedElement = {
+      id: `elem-${Date.now()}`,
+      title: name,
+      category: 'Mis Elementos Guardados',
+      strokes: JSON.parse(JSON.stringify(selectedStrokes)),
+    };
+    saveElementsToStorage([...savedElements, newElement]);
+    alert(`¡"${name}" guardado en tu colección de Elementos!`);
+  };
+
+  // Elements: Insert element onto current page
+  const handleInsertElement = (element: SavedElement) => {
+    // Stamp the element in the center of the page with unique IDs
+    const clonedStrokes: Stroke[] = element.strokes.map((s, idx) => ({
+      ...s,
+      id: `element-stroke-${Date.now()}-${idx}`,
+      points: s.points.map((p) => ({ ...p, x: p.x + 200, y: p.y + 200 })),
+    }));
+    handlePageUpdate({
+      ...currentPage,
+      strokes: [...currentPage.strokes, ...clonedStrokes],
+    });
+  };
+
   // Page Controls
   const handleAddPage = (
     template: PageTemplate = currentPage.template,
@@ -292,6 +369,9 @@ export const App: React.FC = () => {
       id: `page-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       pageNumber: doc.pages.length + 1,
       strokes: JSON.parse(JSON.stringify(target.strokes)),
+      tapes: JSON.parse(JSON.stringify(target.tapes || [])),
+      textBoxes: JSON.parse(JSON.stringify(target.textBoxes || [])),
+      stickyNotes: JSON.parse(JSON.stringify(target.stickyNotes || [])),
     };
     const nextPages = [...doc.pages];
     nextPages.splice(index + 1, 0, clone);
@@ -457,6 +537,11 @@ export const App: React.FC = () => {
             onTitleChange={(title) => setDoc((prev) => ({ ...prev, title }))}
             onBackToLibrary={handleBackToLibrary}
             onOpenPageManager={() => setIsPageManagerOpen(true)}
+            onOpenElementsModal={() => setIsElementsModalOpen(true)}
+            isBookmarked={!!currentPage.isBookmarked}
+            onToggleBookmark={handleToggleBookmark}
+            isReadOnly={isReadOnly}
+            onToggleReadOnly={() => setIsReadOnly((prev) => !prev)}
             currentTool={currentTool}
             onSelectTool={setCurrentTool}
             currentColor={currentColor}
@@ -504,13 +589,15 @@ export const App: React.FC = () => {
               viewport={viewport}
               isAudioRecording={audioState.isRecording}
               audioElapsed={audioState.duration}
+              isReadOnly={isReadOnly}
               onPageUpdate={handlePageUpdate}
               onViewportChange={setViewport}
               onAddStickyNoteAt={handleAddStickyNoteAt}
+              onSaveSelectionAsElement={handleSaveSelectionAsElement}
             />
           </main>
 
-          {/* Page Manager Modal */}
+          {/* Page Manager Modal with Bookmarks & Outline */}
           <PageManagerModal
             pages={doc.pages}
             currentPageIndex={currentPageIndex}
@@ -520,6 +607,16 @@ export const App: React.FC = () => {
             onAddPage={(template, theme) => handleAddPage(template, theme)}
             onDuplicatePage={handleDuplicatePage}
             onDeletePage={handleDeletePage}
+            onToggleBookmark={handleToggleBookmarkAtIndex}
+            onUpdateOutlineTitle={handleUpdateOutlineTitle}
+          />
+
+          {/* Elements & Stickers Collection Modal */}
+          <ElementsModal
+            isOpen={isElementsModalOpen}
+            onClose={() => setIsElementsModalOpen(false)}
+            savedElements={savedElements}
+            onInsertElement={handleInsertElement}
           />
         </>
       )}
