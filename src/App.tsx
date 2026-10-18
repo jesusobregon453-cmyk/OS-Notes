@@ -1,19 +1,31 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import type { NotebookDocument, Page, ToolType, PageTemplate, ViewportState, Stroke } from './types';
+import type {
+  NotebookDocument,
+  Page,
+  ToolType,
+  PageTemplate,
+  PaperTheme,
+  ViewportState,
+  Stroke,
+  AudioRecordingState,
+} from './types';
 import {
   createDefaultNotebook,
   createNewPage,
   saveToLocalStorage,
   loadFromLocalStorage,
-  exportToGnoteFile,
-  importFromGnoteFile,
+  exportToOsNotesFile,
+  importFromOsNotesFile,
 } from './engine/document';
+import { drawPageTemplate } from './engine/templates';
+import { renderStroke } from './engine/inking';
+import { AudioSyncEngine } from './engine/audio';
 import { Toolbar } from './components/Toolbar';
 import { Canvas } from './components/Canvas';
 
 export const App: React.FC = () => {
   const [doc, setDoc] = useState<NotebookDocument>(() => {
-    return loadFromLocalStorage() || createDefaultNotebook('Mi Primer Cuaderno');
+    return loadFromLocalStorage() || createDefaultNotebook('Mi Cuaderno OS Notes');
   });
 
   const [currentPageIndex, setCurrentPageIndex] = useState<number>(0);
@@ -22,6 +34,22 @@ export const App: React.FC = () => {
   const [currentWidth, setCurrentWidth] = useState<number>(2.5);
   const [viewport, setViewport] = useState<ViewportState>({ zoom: 1.0, offsetX: 0, offsetY: 0 });
 
+  // Audio Sync State
+  const [audioState, setAudioState] = useState<AudioRecordingState>({
+    isRecording: false,
+    isPlaying: false,
+    duration: 0,
+    currentTime: 0,
+  });
+
+  const audioEngineRef = useRef<AudioSyncEngine | null>(null);
+
+  useEffect(() => {
+    audioEngineRef.current = new AudioSyncEngine((state) => {
+      setAudioState(state);
+    });
+  }, []);
+
   // Undo / Redo history per page
   const undoStackRef = useRef<Stroke[][]>([]);
   const redoStackRef = useRef<Stroke[][]>([]);
@@ -29,17 +57,25 @@ export const App: React.FC = () => {
 
   const currentPage = doc.pages[currentPageIndex] || doc.pages[0];
 
-  // Save to localStorage automatically
+  // Auto-save to localStorage
   useEffect(() => {
     saveToLocalStorage(doc);
   }, [doc]);
 
-  // Handle Page Stroke Updates (Drawing, Erasing)
+  // Adjust ink color default when switching to dark themes
+  useEffect(() => {
+    if ((currentPage.theme === 'dark' || currentPage.theme === 'chalkboard') && currentColor === '#0f172a') {
+      setCurrentColor('#f8fafc'); // Invert to crisp white
+    } else if (currentPage.theme === 'white' && currentColor === '#f8fafc') {
+      setCurrentColor('#0f172a'); // Invert back to black
+    }
+  }, [currentPage.theme, currentColor]);
+
+  // Handle Page Stroke Updates
   const handlePageUpdate = useCallback(
     (updatedPage: Page) => {
-      // Push current strokes to undo stack
       undoStackRef.current.push([...currentPage.strokes]);
-      redoStackRef.current = []; // Clear redo on new action
+      redoStackRef.current = [];
       setHistoryVersion((v) => v + 1);
 
       setDoc((prevDoc) => {
@@ -89,16 +125,13 @@ export const App: React.FC = () => {
     });
   }, [currentPage, currentPageIndex]);
 
-  // Keyboard Shortcuts (Cmd+Z, Cmd+Shift+Z, etc.)
+  // Keyboard Shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
         e.preventDefault();
-        if (e.shiftKey) {
-          handleRedo();
-        } else {
-          handleUndo();
-        }
+        if (e.shiftKey) handleRedo();
+        else handleUndo();
       } else if ((e.metaKey || e.ctrlKey) && e.key === 'y') {
         e.preventDefault();
         handleRedo();
@@ -108,6 +141,10 @@ export const App: React.FC = () => {
         setCurrentTool('pen');
       } else if (e.key === 'h' && !e.metaKey && !e.ctrlKey) {
         setCurrentTool('highlighter');
+      } else if (e.key === 's' && !e.metaKey && !e.ctrlKey) {
+        setCurrentTool('shape');
+      } else if (e.key === 'l' && !e.metaKey && !e.ctrlKey) {
+        setCurrentTool('lasso');
       } else if (e.key === 'e' && !e.metaKey && !e.ctrlKey) {
         setCurrentTool('eraser');
       } else if (e.key === 'm' && !e.metaKey && !e.ctrlKey) {
@@ -121,7 +158,7 @@ export const App: React.FC = () => {
 
   // Page Controls
   const handleAddPage = () => {
-    const newPage = createNewPage(doc.pages.length + 1, currentPage.template);
+    const newPage = createNewPage(doc.pages.length + 1, currentPage.template, currentPage.theme);
     setDoc((prev) => ({
       ...prev,
       pages: [...prev.pages, newPage],
@@ -161,23 +198,95 @@ export const App: React.FC = () => {
     });
   };
 
-  // Export to .gnote file
+  const handleSelectTheme = (theme: PaperTheme) => {
+    setDoc((prev) => {
+      const nextPages = [...prev.pages];
+      nextPages[currentPageIndex] = {
+        ...nextPages[currentPageIndex],
+        theme,
+      };
+      return { ...prev, pages: nextPages };
+    });
+  };
+
+  // Add Sticky Note
+  const handleAddStickyNoteAt = (x: number, y: number) => {
+    const newNote = {
+      id: `sticky-${Date.now()}`,
+      x: Math.max(10, x - 100),
+      y: Math.max(10, y - 50),
+      width: 200,
+      height: 120,
+      text: '',
+      color: '#fef08a',
+    };
+    const notes = [...(currentPage.stickyNotes || []), newNote];
+    handlePageUpdate({ ...currentPage, stickyNotes: notes });
+    setCurrentTool('fountain'); // Revert to pen after dropping note
+  };
+
+  // Audio Sync Actions
+  const handleStartAudio = async () => {
+    if (audioEngineRef.current) {
+      await audioEngineRef.current.startRecording();
+    }
+  };
+
+  const handleStopAudio = () => {
+    if (audioEngineRef.current) {
+      audioEngineRef.current.stopRecording();
+    }
+  };
+
+  const handlePlayAudio = () => {
+    if (audioEngineRef.current) {
+      audioEngineRef.current.playAudio();
+    }
+  };
+
+  const handlePauseAudio = () => {
+    if (audioEngineRef.current) {
+      audioEngineRef.current.pauseAudio();
+    }
+  };
+
+  // Export to .osnotes file
   const handleExport = async () => {
-    const blob = await exportToGnoteFile(doc);
+    const blob = await exportToOsNotesFile(doc);
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${doc.title.replace(/\s+/g, '_') || 'cuaderno'}.gnote`;
+    a.download = `${doc.title.replace(/\s+/g, '_') || 'cuaderno'}.osnotes`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
-  // Import from .gnote file
+  // Export current page to crisp PNG
+  const handleExportImage = () => {
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = currentPage.width * 2;
+    tempCanvas.height = currentPage.height * 2;
+    const ctx = tempCanvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.scale(2, 2);
+    drawPageTemplate(ctx, currentPage.width, currentPage.height, currentPage.template, currentPage.theme);
+    for (const stroke of currentPage.strokes) {
+      renderStroke(ctx, stroke, 1.0);
+    }
+    const url = tempCanvas.toDataURL('image/png');
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${doc.title}_Pagina_${currentPageIndex + 1}.png`;
+    a.click();
+  };
+
+  // Import from .osnotes file
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const importedDoc = await importFromGnoteFile(file);
+      const importedDoc = await importFromOsNotesFile(file);
       setDoc(importedDoc);
       setCurrentPageIndex(0);
       undoStackRef.current = [];
@@ -190,7 +299,7 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col w-screen h-screen overflow-hidden bg-slate-900">
+    <div className="flex flex-col w-screen h-screen overflow-hidden bg-slate-950 font-sans">
       <Toolbar
         title={doc.title}
         onTitleChange={(title) => setDoc((prev) => ({ ...prev, title }))}
@@ -207,6 +316,20 @@ export const App: React.FC = () => {
         onAddPage={handleAddPage}
         currentTemplate={currentPage.template}
         onSelectTemplate={handleSelectTemplate}
+        currentTheme={currentPage.theme || 'white'}
+        onSelectTheme={handleSelectTheme}
+        canvasMode={doc.canvasMode || 'paged'}
+        onToggleCanvasMode={() =>
+          setDoc((prev) => ({
+            ...prev,
+            canvasMode: prev.canvasMode === 'paged' ? 'infinite' : 'paged',
+          }))
+        }
+        audioState={audioState}
+        onStartAudioRecording={handleStartAudio}
+        onStopAudioRecording={handleStopAudio}
+        onPlayAudio={handlePlayAudio}
+        onPauseAudio={handlePauseAudio}
         canUndo={undoStackRef.current.length > 0}
         canRedo={redoStackRef.current.length > 0}
         onUndo={handleUndo}
@@ -214,6 +337,7 @@ export const App: React.FC = () => {
         viewport={viewport}
         onViewportChange={setViewport}
         onExport={handleExport}
+        onExportImage={handleExportImage}
         onImport={handleImport}
       />
 
@@ -224,8 +348,11 @@ export const App: React.FC = () => {
           currentColor={currentColor}
           currentWidth={currentWidth}
           viewport={viewport}
+          isAudioRecording={audioState.isRecording}
+          audioElapsed={audioState.duration}
           onPageUpdate={handlePageUpdate}
           onViewportChange={setViewport}
+          onAddStickyNoteAt={handleAddStickyNoteAt}
         />
       </main>
     </div>

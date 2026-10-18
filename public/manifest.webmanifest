@@ -1,9 +1,9 @@
 {
-  "name": "Goodnotes Clone",
-  "short_name": "Goodnotes",
+  "name": "OS Notes Pro",
+  "short_name": "OS Notes",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0f172a",
-  "theme_color": "#4f46e5",
-  "description": "Cuaderno digital multiplataforma con motor de tinta vectorial y soporte de stylus."
+  "background_color": "#090d16",
+  "theme_color": "#6366f1",
+  "description": "OS Notes: Aplicación profesional de toma de notas manuscritas, lienzo infinito y anotación vectorial multiplataforma."
 }

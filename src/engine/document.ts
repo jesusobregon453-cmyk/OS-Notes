@@ -1,33 +1,39 @@
 import JSZip from 'jszip';
-import type { NotebookDocument, Page, PageTemplate } from '../types';
+import type { NotebookDocument, Page, PageTemplate, PaperTheme, CanvasMode } from '../types';
 
 export const A4_WIDTH = 794;
 export const A4_HEIGHT = 1123;
 
-export function createNewPage(pageNumber: number, template: PageTemplate = 'ruled'): Page {
+export function createNewPage(
+  pageNumber: number,
+  template: PageTemplate = 'ruled',
+  theme: PaperTheme = 'white'
+): Page {
   return {
     id: `page-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     pageNumber,
     width: A4_WIDTH,
     height: A4_HEIGHT,
     template,
-    templateColor: '#f9f9fb',
+    theme,
     strokes: [],
+    stickyNotes: [],
   };
 }
 
-export function createDefaultNotebook(title: string = 'Cuaderno sin título'): NotebookDocument {
-  const firstPage = createNewPage(1, 'ruled');
+export function createDefaultNotebook(title: string = 'Mi Cuaderno OS Notes'): NotebookDocument {
+  const firstPage = createNewPage(1, 'ruled', 'white');
   return {
-    id: `doc-${Date.now()}`,
+    id: `osnotes-${Date.now()}`,
     title,
+    canvasMode: 'paged',
     createdAt: Date.now(),
     updatedAt: Date.now(),
     pages: [firstPage],
   };
 }
 
-const STORAGE_KEY = 'goodnotes_clone_current_document';
+const STORAGE_KEY = 'os_notes_current_document';
 
 export function saveToLocalStorage(doc: NotebookDocument): void {
   try {
@@ -49,15 +55,17 @@ export function loadFromLocalStorage(): NotebookDocument | null {
 }
 
 /**
- * Packages the document into a Goodnotes-like .gnote ZIP container
+ * Packages the document into an .osnotes / .gnote ZIP container
  */
-export async function exportToGnoteFile(doc: NotebookDocument): Promise<Blob> {
+export async function exportToOsNotesFile(doc: NotebookDocument): Promise<Blob> {
   const zip = new JSZip();
 
   const manifest = {
-    formatVersion: '1.0',
+    application: 'OS Notes Pro',
+    formatVersion: '2.0',
     id: doc.id,
     title: doc.title,
+    canvasMode: doc.canvasMode || 'paged',
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
     pageCount: doc.pages.length,
@@ -76,9 +84,9 @@ export async function exportToGnoteFile(doc: NotebookDocument): Promise<Blob> {
 }
 
 /**
- * Loads a .gnote ZIP file back into a NotebookDocument
+ * Loads an .osnotes or .gnote ZIP file back into a NotebookDocument
  */
-export async function importFromGnoteFile(file: File): Promise<NotebookDocument> {
+export async function importFromOsNotesFile(file: File): Promise<NotebookDocument> {
   const zip = await JSZip.loadAsync(file);
   const manifestFile = zip.file('manifest.json');
   if (!manifestFile) {
@@ -92,15 +100,20 @@ export async function importFromGnoteFile(file: File): Promise<NotebookDocument>
     const pageFile = zip.file(`pages/page_${i}.json`);
     if (pageFile) {
       const pageData = JSON.parse(await pageFile.async('string')) as Page;
-      pages.push(pageData);
+      pages.push({
+        ...pageData,
+        theme: pageData.theme || 'white',
+        stickyNotes: pageData.stickyNotes || [],
+      });
     }
   }
 
   return {
     id: manifest.id,
     title: manifest.title,
+    canvasMode: (manifest.canvasMode as CanvasMode) || 'paged',
     createdAt: manifest.createdAt,
     updatedAt: Date.now(),
-    pages: pages.length > 0 ? pages : [createNewPage(1, 'ruled')],
+    pages: pages.length > 0 ? pages : [createNewPage(1, 'ruled', 'white')],
   };
 }

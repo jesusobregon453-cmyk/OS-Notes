@@ -5,11 +5,48 @@ export interface Point {
   tiltX?: number;
   tiltY?: number;
   time: number;
+  audioTimeOffset?: number; // Time in seconds from audio recording start
 }
 
-export type ToolType = 'pen' | 'fountain' | 'brush' | 'highlighter' | 'eraser' | 'lasso' | 'pan';
+export type ToolType =
+  | 'fountain'
+  | 'pen'
+  | 'brush'
+  | 'highlighter'
+  | 'eraser'
+  | 'lasso'
+  | 'laser'
+  | 'ruler'
+  | 'shape'
+  | 'sticky'
+  | 'pan';
 
-export type PageTemplate = 'blank' | 'ruled' | 'grid' | 'dotted' | 'cornell';
+export type PageTemplate =
+  | 'blank'
+  | 'ruled'
+  | 'grid'
+  | 'dotted'
+  | 'cornell'
+  | 'hexagonal'
+  | 'music_stave';
+
+export type PaperTheme =
+  | 'white'
+  | 'dark'
+  | 'blueprint'
+  | 'parchment'
+  | 'chalkboard';
+
+export type CanvasMode = 'paged' | 'infinite';
+
+export type DetectedShapeType =
+  | 'none'
+  | 'line'
+  | 'arrow'
+  | 'rectangle'
+  | 'circle'
+  | 'ellipse'
+  | 'triangle';
 
 export interface BoundingBox {
   minX: number;
@@ -26,6 +63,18 @@ export interface Stroke {
   opacity: number;
   points: Point[];
   bounds: BoundingBox;
+  shapeType?: DetectedShapeType;
+  audioTimestamp?: number;
+}
+
+export interface StickyNote {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  text: string;
+  color: string;
 }
 
 export interface Page {
@@ -34,13 +83,15 @@ export interface Page {
   width: number;
   height: number;
   template: PageTemplate;
-  templateColor: string;
+  theme: PaperTheme;
   strokes: Stroke[];
+  stickyNotes?: StickyNote[];
 }
 
 export interface NotebookDocument {
   id: string;
   title: string;
+  canvasMode: CanvasMode;
   createdAt: number;
   updatedAt: number;
   pages: Page[];
@@ -52,7 +103,12 @@ export interface ViewportState {
   offsetY: number;
 }
 
-export interface PenPreset {
-  color: string;
-  width: number;
+export interface AudioRecordingState {
+  isRecording: boolean;
+  isPlaying: boolean;
+  duration: number;
+  currentTime: number;
+  audioBlob?: Blob;
+  audioUrl?: string;
+  recordingStartTime?: number;
 }

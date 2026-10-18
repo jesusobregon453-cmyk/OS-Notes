@@ -1,8 +1,13 @@
-import React, { useRef, useEffect, useCallback } from 'react';
-import type { Page, ToolType, Stroke, Point, ViewportState } from '../types';
+import React, { useRef, useEffect, useCallback, useState } from 'react';
+import type { Page, ToolType, Stroke, Point, ViewportState, BoundingBox } from '../types';
 import { drawPageTemplate } from '../engine/templates';
 import { renderStroke, calculateStrokeBounds } from '../engine/inking';
 import { strokeIntersectsEraser } from '../engine/spatial';
+import { detectGeometricShape } from '../engine/shapes';
+import { LaserPointerEngine } from '../engine/laser';
+import { selectStrokesWithLasso, renderLassoOverlay } from '../engine/lasso';
+import { StickyNotesLayer } from './StickyNotesLayer';
+import { LassoActionBar } from './LassoActionBar';
 
 interface CanvasProps {
   page: Page;
@@ -10,8 +15,11 @@ interface CanvasProps {
   currentColor: string;
   currentWidth: number;
   viewport: ViewportState;
+  isAudioRecording: boolean;
+  audioElapsed: number;
   onPageUpdate: (updatedPage: Page) => void;
   onViewportChange: (viewport: ViewportState) => void;
+  onAddStickyNoteAt?: (x: number, y: number) => void;
 }
 
 export const Canvas: React.FC<CanvasProps> = ({
@@ -20,8 +28,11 @@ export const Canvas: React.FC<CanvasProps> = ({
   currentColor,
   currentWidth,
   viewport,
+  isAudioRecording,
+  audioElapsed,
   onPageUpdate,
   onViewportChange,
+  onAddStickyNoteAt,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const bgCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -34,9 +45,18 @@ export const Canvas: React.FC<CanvasProps> = ({
   const isPanningRef = useRef(false);
   const panStartRef = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
 
+  // Laser Pointer Engine
+  const laserEngineRef = useRef<LaserPointerEngine>(new LaserPointerEngine());
+  const laserAnimRef = useRef<number | null>(null);
+
+  // Lasso Selection State
+  const [selectedStrokeIds, setSelectedStrokeIds] = useState<string[]>([]);
+  const [selectionBounds, setSelectionBounds] = useState<BoundingBox | null>(null);
+  const lassoPolygonRef = useRef<Point[]>([]);
+
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
 
-  // Render Background Template
+  // Render Background Template with Theme
   useEffect(() => {
     const canvas = bgCanvasRef.current;
     if (!canvas) return;
@@ -47,8 +67,8 @@ export const Canvas: React.FC<CanvasProps> = ({
     canvas.height = page.height * dpr;
     ctx.scale(dpr, dpr);
 
-    drawPageTemplate(ctx, page.width, page.height, page.template);
-  }, [page.width, page.height, page.template, dpr]);
+    drawPageTemplate(ctx, page.width, page.height, page.template, page.theme || 'white');
+  }, [page.width, page.height, page.template, page.theme, dpr]);
 
   // Render Static Strokes
   const redrawStaticStrokes = useCallback(() => {
@@ -62,7 +82,6 @@ export const Canvas: React.FC<CanvasProps> = ({
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.scale(dpr, dpr);
 
-    // First render highlighters (multiply blend mode behind ink)
     const highlighters = page.strokes.filter((s) => s.tool === 'highlighter');
     const normalStrokes = page.strokes.filter((s) => s.tool !== 'highlighter');
 
@@ -78,7 +97,39 @@ export const Canvas: React.FC<CanvasProps> = ({
     redrawStaticStrokes();
   }, [redrawStaticStrokes]);
 
-  // Transform screen coordinate to canvas coordinate
+  // Laser Animation Loop
+  const startLaserLoop = useCallback(() => {
+    if (laserAnimRef.current) return;
+
+    const loop = () => {
+      const overlay = overlayCanvasRef.current;
+      if (overlay) {
+        const ctx = overlay.getContext('2d');
+        if (ctx) {
+          overlay.width = page.width * dpr;
+          overlay.height = page.height * dpr;
+          ctx.clearRect(0, 0, overlay.width, overlay.height);
+          ctx.scale(dpr, dpr);
+          laserEngineRef.current.render(ctx, 1.0);
+        }
+      }
+
+      const hasPoints = laserEngineRef.current.update();
+      if (hasPoints) {
+        laserAnimRef.current = requestAnimationFrame(loop);
+      } else {
+        laserAnimRef.current = null;
+        const overlay = overlayCanvasRef.current;
+        if (overlay) {
+          const ctx = overlay.getContext('2d');
+          if (ctx) ctx.clearRect(0, 0, overlay.width, overlay.height);
+        }
+      }
+    };
+
+    laserAnimRef.current = requestAnimationFrame(loop);
+  }, [page.width, page.height, dpr]);
+
   const screenToCanvas = (clientX: number, clientY: number): { x: number; y: number } => {
     const container = containerRef.current;
     if (!container) return { x: 0, y: 0 };
@@ -89,8 +140,15 @@ export const Canvas: React.FC<CanvasProps> = ({
   };
 
   const handlePointerDown = (e: React.PointerEvent) => {
-    // Left click or pen tip only
     if (e.button !== 0 && e.pointerType === 'mouse') return;
+
+    const { x, y } = screenToCanvas(e.clientX, e.clientY);
+
+    // Sticky Note placement tool
+    if (currentTool === 'sticky') {
+      onAddStickyNoteAt?.(x, y);
+      return;
+    }
 
     if (currentTool === 'pan' || e.buttons === 4 || e.altKey) {
       isPanningRef.current = true;
@@ -107,8 +165,13 @@ export const Canvas: React.FC<CanvasProps> = ({
     isDrawingRef.current = true;
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
 
-    const { x, y } = screenToCanvas(e.clientX, e.clientY);
     const pressure = e.pressure > 0 ? e.pressure : 0.5;
+
+    if (currentTool === 'laser') {
+      laserEngineRef.current.addPoint(x, y);
+      startLaserLoop();
+      return;
+    }
 
     if (currentTool === 'eraser') {
       handleEraser(x, y);
@@ -116,6 +179,15 @@ export const Canvas: React.FC<CanvasProps> = ({
       return;
     }
 
+    if (currentTool === 'lasso') {
+      lassoPolygonRef.current = [{ x, y, pressure, time: Date.now() }];
+      setSelectedStrokeIds([]);
+      setSelectionBounds(null);
+      drawLasso();
+      return;
+    }
+
+    // Normal drawing stroke
     activePointsRef.current = [{
       x,
       y,
@@ -123,9 +195,9 @@ export const Canvas: React.FC<CanvasProps> = ({
       tiltX: e.tiltX,
       tiltY: e.tiltY,
       time: Date.now(),
+      audioTimeOffset: isAudioRecording ? audioElapsed : undefined,
     }];
 
-    // Clear active canvas
     const activeCanvas = activeCanvasRef.current;
     if (activeCanvas) {
       const ctx = activeCanvas.getContext('2d');
@@ -155,13 +227,25 @@ export const Canvas: React.FC<CanvasProps> = ({
 
     const { x, y } = screenToCanvas(e.clientX, e.clientY);
 
+    if (currentTool === 'laser') {
+      laserEngineRef.current.addPoint(x, y);
+      startLaserLoop();
+      return;
+    }
+
     if (currentTool === 'eraser') {
       handleEraser(x, y);
       drawEraserIndicator(x, y);
       return;
     }
 
-    // Extract coalesced points for 240Hz stylus fidelity
+    if (currentTool === 'lasso') {
+      lassoPolygonRef.current.push({ x, y, pressure: 0.5, time: Date.now() });
+      drawLasso();
+      return;
+    }
+
+    // High frequency stylus coalesced events
     const coalescedEvents = (e.nativeEvent as any).getCoalescedEvents
       ? (e.nativeEvent as any).getCoalescedEvents()
       : [e.nativeEvent];
@@ -176,10 +260,11 @@ export const Canvas: React.FC<CanvasProps> = ({
         tiltX: ev.tiltX,
         tiltY: ev.tiltY,
         time: Date.now(),
+        audioTimeOffset: isAudioRecording ? audioElapsed : undefined,
       });
     }
 
-    // Draw active stroke on active layer
+    // Draw active stroke
     const activeCanvas = activeCanvasRef.current;
     if (!activeCanvas) return;
     const ctx = activeCanvas.getContext('2d');
@@ -220,13 +305,36 @@ export const Canvas: React.FC<CanvasProps> = ({
       (e.target as HTMLElement).releasePointerCapture(e.pointerId);
     } catch (_) {}
 
+    if (currentTool === 'laser') {
+      return;
+    }
+
     if (currentTool === 'eraser') {
       clearOverlay();
       return;
     }
 
-    const points = activePointsRef.current;
+    if (currentTool === 'lasso') {
+      const selection = selectStrokesWithLasso(page.strokes, lassoPolygonRef.current);
+      setSelectedStrokeIds(selection.selectedStrokeIds);
+      setSelectionBounds(selection.bounds);
+      lassoPolygonRef.current = [];
+      drawLasso(selection);
+      return;
+    }
+
+    let points = activePointsRef.current;
     if (points.length === 0) return;
+
+    // Shape recognition (if tool is 'shape' or automatic detection)
+    let shapeType = undefined;
+    if (currentTool === 'shape' || points.length > 10) {
+      const detected = detectGeometricShape(points);
+      if (detected.type !== 'none') {
+        points = detected.perfectPoints;
+        shapeType = detected.type;
+      }
+    }
 
     const bounds = calculateStrokeBounds(points, currentWidth);
     const newStroke: Stroke = {
@@ -237,18 +345,18 @@ export const Canvas: React.FC<CanvasProps> = ({
       opacity: currentTool === 'highlighter' ? 0.35 : 1.0,
       points: [...points],
       bounds,
+      shapeType,
+      audioTimestamp: isAudioRecording ? audioElapsed : undefined,
     };
 
     activePointsRef.current = [];
 
-    // Clear active canvas
     const activeCanvas = activeCanvasRef.current;
     if (activeCanvas) {
       const ctx = activeCanvas.getContext('2d');
       if (ctx) ctx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
     }
 
-    // Commit to page strokes
     onPageUpdate({
       ...page,
       strokes: [...page.strokes, newStroke],
@@ -287,6 +395,20 @@ export const Canvas: React.FC<CanvasProps> = ({
     ctx.stroke();
   };
 
+  const drawLasso = (selection: { selectedStrokeIds: string[]; bounds: BoundingBox | null } | null = null) => {
+    const overlay = overlayCanvasRef.current;
+    if (!overlay) return;
+    const ctx = overlay.getContext('2d');
+    if (!ctx) return;
+
+    overlay.width = page.width * dpr;
+    overlay.height = page.height * dpr;
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
+    ctx.scale(dpr, dpr);
+
+    renderLassoOverlay(ctx, lassoPolygonRef.current, selection, 1.0);
+  };
+
   const clearOverlay = () => {
     const overlay = overlayCanvasRef.current;
     if (!overlay) return;
@@ -294,18 +416,69 @@ export const Canvas: React.FC<CanvasProps> = ({
     if (ctx) ctx.clearRect(0, 0, overlay.width, overlay.height);
   };
 
-  // Wheel zoom with Ctrl or trackpad pinch
+  // Lasso batch modifications
+  const handleLassoRecolor = (newColor: string) => {
+    const updated = page.strokes.map((s) => {
+      if (selectedStrokeIds.includes(s.id)) {
+        return { ...s, color: newColor };
+      }
+      return s;
+    });
+    onPageUpdate({ ...page, strokes: updated });
+  };
+
+  const handleLassoDuplicate = () => {
+    const clones: Stroke[] = [];
+    for (const s of page.strokes) {
+      if (selectedStrokeIds.includes(s.id)) {
+        const offsetPoints = s.points.map((p) => ({ ...p, x: p.x + 20, y: p.y + 20 }));
+        clones.push({
+          ...s,
+          id: `stroke-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          points: offsetPoints,
+          bounds: calculateStrokeBounds(offsetPoints, s.baseWidth),
+        });
+      }
+    }
+    onPageUpdate({ ...page, strokes: [...page.strokes, ...clones] });
+    setSelectedStrokeIds([]);
+    setSelectionBounds(null);
+    clearOverlay();
+  };
+
+  const handleLassoDelete = () => {
+    const remaining = page.strokes.filter((s) => !selectedStrokeIds.includes(s.id));
+    onPageUpdate({ ...page, strokes: remaining });
+    setSelectedStrokeIds([]);
+    setSelectionBounds(null);
+    clearOverlay();
+  };
+
+  const handleLassoChangeWidth = (delta: number) => {
+    const updated = page.strokes.map((s) => {
+      if (selectedStrokeIds.includes(s.id)) {
+        const newW = Math.max(1.0, s.baseWidth + delta);
+        return {
+          ...s,
+          baseWidth: newW,
+          bounds: calculateStrokeBounds(s.points, newW),
+        };
+      }
+      return s;
+    });
+    onPageUpdate({ ...page, strokes: updated });
+  };
+
   const handleWheel = (e: React.WheelEvent) => {
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault();
       const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
-      const newZoom = Math.min(3.0, Math.max(0.3, viewport.zoom * zoomFactor));
+      const newZoom = Math.min(3.5, Math.max(0.25, viewport.zoom * zoomFactor));
       onViewportChange({
         ...viewport,
         zoom: newZoom,
       });
     } else {
-      // Normal scroll pans the viewport
       onViewportChange({
         ...viewport,
         offsetX: viewport.offsetX - e.deltaX,
@@ -316,7 +489,7 @@ export const Canvas: React.FC<CanvasProps> = ({
 
   return (
     <div
-      className="relative flex-1 w-full h-full overflow-hidden bg-slate-200 select-none flex items-center justify-center cursor-crosshair"
+      className="relative flex-1 w-full h-full overflow-hidden bg-slate-950 select-none flex items-center justify-center cursor-crosshair"
       onWheel={handleWheel}
       style={{ touchAction: 'none' }}
     >
@@ -327,7 +500,14 @@ export const Canvas: React.FC<CanvasProps> = ({
           width: `${page.width}px`,
           height: `${page.height}px`,
           transform: `translate(${viewport.offsetX}px, ${viewport.offsetY}px) scale(${viewport.zoom})`,
-          cursor: currentTool === 'pan' ? 'grab' : currentTool === 'eraser' ? 'none' : 'crosshair',
+          cursor:
+            currentTool === 'pan'
+              ? 'grab'
+              : currentTool === 'eraser'
+              ? 'none'
+              : currentTool === 'laser'
+              ? 'none'
+              : 'crosshair',
         }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -337,7 +517,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         {/* Layer 1: Background Template */}
         <canvas
           ref={bgCanvasRef}
-          className="absolute inset-0 pointer-events-none rounded-sm"
+          className="absolute inset-0 pointer-events-none rounded-sm shadow-xl"
           style={{ width: `${page.width}px`, height: `${page.height}px` }}
         />
 
@@ -355,13 +535,49 @@ export const Canvas: React.FC<CanvasProps> = ({
           style={{ width: `${page.width}px`, height: `${page.height}px` }}
         />
 
-        {/* Layer 4: UI Overlay (Eraser cursor, selection marquee) */}
+        {/* Layer 4: UI Overlay (Lasso, Laser, Eraser cursor) */}
         <canvas
           ref={overlayCanvasRef}
           className="absolute inset-0 pointer-events-none"
           style={{ width: `${page.width}px`, height: `${page.height}px` }}
         />
+
+        {/* Layer 5: Sticky Notes Overlay */}
+        {page.stickyNotes && page.stickyNotes.length > 0 && (
+          <StickyNotesLayer
+            notes={page.stickyNotes}
+            scale={1.0}
+            onUpdateNote={(updatedNote) => {
+              const notes = (page.stickyNotes || []).map((n) =>
+                n.id === updatedNote.id ? updatedNote : n
+              );
+              onPageUpdate({ ...page, stickyNotes: notes });
+            }}
+            onDeleteNote={(id) => {
+              const notes = (page.stickyNotes || []).filter((n) => n.id !== id);
+              onPageUpdate({ ...page, stickyNotes: notes });
+            }}
+          />
+        )}
       </div>
+
+      {/* Floating Lasso Action Bar */}
+      {selectionBounds && selectedStrokeIds.length > 0 && (
+        <LassoActionBar
+          bounds={selectionBounds}
+          viewportZoom={viewport.zoom}
+          viewportOffset={{ x: viewport.offsetX, y: viewport.offsetY }}
+          onRecolor={handleLassoRecolor}
+          onDuplicate={handleLassoDuplicate}
+          onDelete={handleLassoDelete}
+          onChangeWidth={handleLassoChangeWidth}
+          onClose={() => {
+            setSelectedStrokeIds([]);
+            setSelectionBounds(null);
+            clearOverlay();
+          }}
+        />
+      )}
     </div>
   );
 };
