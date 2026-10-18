@@ -1,0 +1,9 @@
+{
+  "name": "Goodnotes Clone",
+  "short_name": "Goodnotes",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#4f46e5",
+  "description": "Cuaderno digital multiplataforma con motor de tinta vectorial y soporte de stylus."
+}
