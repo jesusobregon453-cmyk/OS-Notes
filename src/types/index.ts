@@ -5,13 +5,15 @@ export interface Point {
   tiltX?: number;
   tiltY?: number;
   time: number;
-  audioTimeOffset?: number; // Time in seconds from audio recording start
+  audioTimeOffset?: number;
 }
 
 export type ToolType =
   | 'fountain'
   | 'pen'
   | 'brush'
+  | 'calligraphy'
+  | 'pencil'
   | 'highlighter'
   | 'eraser'
   | 'lasso'
@@ -88,9 +90,26 @@ export interface Page {
   stickyNotes?: StickyNote[];
 }
 
+export interface NotebookCover {
+  color: string;
+  style: 'leather' | 'minimal' | 'spiral' | 'gradient';
+  label?: string;
+}
+
+export interface NotebookSummary {
+  id: string;
+  title: string;
+  coverColor: string;
+  coverStyle: 'leather' | 'minimal' | 'spiral' | 'gradient';
+  pageCount: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface NotebookDocument {
   id: string;
   title: string;
+  cover?: NotebookCover;
   canvasMode: CanvasMode;
   createdAt: number;
   updatedAt: number;

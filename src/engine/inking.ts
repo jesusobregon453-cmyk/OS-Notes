@@ -1,17 +1,11 @@
 import type { Point, Stroke, ToolType, BoundingBox } from '../types';
 
-/**
- * Calculates distance between two points
- */
 export function distance(p1: Point, p2: Point): number {
   const dx = p2.x - p1.x;
   const dy = p2.y - p1.y;
   return Math.hypot(dx, dy);
 }
 
-/**
- * Evaluates a Catmull-Rom spline at parameter t in [0, 1]
- */
 function catmullRom(p0: number, p1: number, p2: number, p3: number, t: number): number {
   const t2 = t * t;
   const t3 = t2 * t;
@@ -24,7 +18,7 @@ function catmullRom(p0: number, p1: number, p2: number, p3: number, t: number): 
 }
 
 /**
- * Computes dynamic radius for a point based on tool type, baseWidth, pressure, and velocity
+ * Computes dynamic radius for a point based on tool, pressure, velocity, and tilt
  */
 export function computeRadius(
   point: Point,
@@ -41,42 +35,58 @@ export function computeRadius(
   const p = point.pressure > 0 ? point.pressure : 0.5;
 
   let velocity = 0;
-  if (prevPoint && point.time > prevPoint.time) {
+  let angle = 0;
+  if (prevPoint) {
     const dist = distance(point, prevPoint);
-    const dt = (point.time - prevPoint.time) / 1000;
-    velocity = dt > 0 ? dist / dt : 0;
+    const dt = Math.max(1, point.time - prevPoint.time) / 1000;
+    velocity = dist / dt;
+    angle = Math.atan2(point.y - prevPoint.y, point.x - prevPoint.x);
   }
 
-  // Velocity factor: higher speed narrows the stroke slightly
-  const vFactor = Math.max(0.4, 1.0 - Math.min(velocity / 3000, 0.6));
+  // Velocity dampening
+  const vFactor = Math.max(0.35, 1.0 - Math.min(velocity / 3200, 0.65));
 
   if (tool === 'pen') {
-    // Ballpoint pen: very stable, minor pressure variation
+    // Ballpoint: consistent, clean ink flow with subtle pressure feedback
     return (baseWidth / 2) * (0.85 + 0.3 * p);
   }
 
   if (tool === 'fountain') {
-    // Fountain pen: expressive, responsive to pressure and speed
-    let radius = (baseWidth / 2) * (0.35 + 1.1 * p) * vFactor;
-
-    // Taper start and end for authentic ink flow
-    if (index < 3 && totalPoints > 6) {
-      radius *= (index + 1) / 4;
-    } else if (index >= totalPoints - 3 && totalPoints > 6) {
-      radius *= (totalPoints - index) / 4;
+    // Fountain Pen: fluid, expressive ink with start/end tapering
+    let radius = (baseWidth / 2) * (0.3 + 1.2 * p) * vFactor;
+    if (index < 4 && totalPoints > 8) {
+      radius *= (index + 1) / 5;
+    } else if (index >= totalPoints - 4 && totalPoints > 8) {
+      radius *= (totalPoints - index) / 5;
     }
     return Math.max(radius, baseWidth * 0.15);
   }
 
+  if (tool === 'calligraphy') {
+    // Calligraphy Chisel Nib: fixed 40 degree blade angle
+    const nibAngle = (40 * Math.PI) / 180;
+    const diffAngle = angle - nibAngle;
+    const chiselFactor = Math.abs(Math.sin(diffAngle));
+    const width = (baseWidth / 2) * (0.25 + 1.2 * chiselFactor) * (0.8 + 0.4 * p);
+    return Math.max(width, baseWidth * 0.2);
+  }
+
+  if (tool === 'pencil') {
+    // Graphite Pencil: softer response, broader when tilted
+    const tilt = point.tiltX && point.tiltY ? Math.hypot(point.tiltX, point.tiltY) : 0;
+    const tiltMultiplier = 1.0 + Math.min(tilt / 45, 0.8);
+    return (baseWidth / 2) * (0.6 + 0.6 * p) * tiltMultiplier;
+  }
+
   if (tool === 'brush') {
-    return (baseWidth / 2) * (0.2 + 1.5 * p);
+    return (baseWidth / 2) * (0.2 + 1.6 * p);
   }
 
   return baseWidth / 2;
 }
 
 /**
- * Interpolates and smooths an array of raw points using Catmull-Rom splines
+ * Smooths raw points using Catmull-Rom splines and sub-segment interpolation
  */
 export function smoothPoints(rawPoints: Point[]): Point[] {
   if (rawPoints.length < 3) return rawPoints;
@@ -90,8 +100,7 @@ export function smoothPoints(rawPoints: Point[]): Point[] {
     const p3 = i < rawPoints.length - 2 ? rawPoints[i + 2] : p2;
 
     const segDist = distance(p1, p2);
-    // Number of interpolated sub-samples based on distance
-    const steps = Math.min(8, Math.max(1, Math.floor(segDist / 4)));
+    const steps = Math.min(8, Math.max(1, Math.floor(segDist / 3.5)));
 
     for (let step = 1; step <= steps; step++) {
       const t = step / steps;
@@ -99,8 +108,9 @@ export function smoothPoints(rawPoints: Point[]): Point[] {
       const y = catmullRom(p0.y, p1.y, p2.y, p3.y, t);
       const pressure = p1.pressure + (p2.pressure - p1.pressure) * t;
       const time = p1.time + (p2.time - p1.time) * t;
+      const audioTimeOffset = p1.audioTimeOffset;
 
-      smoothed.push({ x, y, pressure, time });
+      smoothed.push({ x, y, pressure, time, audioTimeOffset });
     }
   }
 
@@ -108,12 +118,13 @@ export function smoothPoints(rawPoints: Point[]): Point[] {
 }
 
 /**
- * Builds ribbon polygon vertices (left and right outlines) from smoothed points
+ * Generates ribbon polygon mesh from smoothed points
  */
-export function generateRibbonPolygon(points: Point[], tool: ToolType, baseWidth: number): {
-  leftOutline: Point[];
-  rightOutline: Point[];
-} {
+export function generateRibbonPolygon(
+  points: Point[],
+  tool: ToolType,
+  baseWidth: number
+): { leftOutline: Point[]; rightOutline: Point[] } {
   const leftOutline: Point[] = [];
   const rightOutline: Point[] = [];
 
@@ -146,7 +157,6 @@ export function generateRibbonPolygon(points: Point[], tool: ToolType, baseWidth
     let ny = 1;
 
     if (len > 0.0001) {
-      // Normal vector (perpendicular to movement direction)
       nx = -dy / len;
       ny = dx / len;
     }
@@ -170,19 +180,12 @@ export function generateRibbonPolygon(points: Point[], tool: ToolType, baseWidth
   return { leftOutline, rightOutline };
 }
 
-/**
- * Calculates the bounding box of a stroke
- */
 export function calculateStrokeBounds(points: Point[], baseWidth: number): BoundingBox {
   if (points.length === 0) {
     return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
   }
 
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   const pad = baseWidth * 2;
 
   for (const p of points) {
@@ -201,7 +204,7 @@ export function calculateStrokeBounds(points: Point[], baseWidth: number): Bound
 }
 
 /**
- * High-performance vector stroke renderer for HTML5 Canvas
+ * Master vector stroke renderer supporting Fountain, Calligraphy, Pencil, Ballpoint, and Highlighter
  */
 export function renderStroke(
   ctx: CanvasRenderingContext2D,
@@ -218,6 +221,9 @@ export function renderStroke(
     ctx.globalAlpha = stroke.opacity || 0.35;
     ctx.lineCap = 'square';
     ctx.lineJoin = 'bevel';
+  } else if (stroke.tool === 'pencil') {
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = stroke.opacity || 0.82;
   } else {
     ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = stroke.opacity || 1.0;
@@ -226,7 +232,6 @@ export function renderStroke(
   ctx.fillStyle = stroke.color;
   ctx.strokeStyle = stroke.color;
 
-  // Single dot click
   if (points.length === 1) {
     const p = points[0];
     const r = Math.max(1, (stroke.baseWidth / 2) * (p.pressure || 0.5));
@@ -237,7 +242,6 @@ export function renderStroke(
     return;
   }
 
-  // Smooth points and generate ribbon
   const smoothed = points.length > 3 ? smoothPoints(points) : points;
   const { leftOutline, rightOutline } = generateRibbonPolygon(smoothed, stroke.tool, stroke.baseWidth);
 
@@ -249,23 +253,19 @@ export function renderStroke(
   ctx.beginPath();
   ctx.moveTo(leftOutline[0].x * scale, leftOutline[0].y * scale);
 
-  // Trace left outline forward
   for (let i = 1; i < leftOutline.length; i++) {
     ctx.lineTo(leftOutline[i].x * scale, leftOutline[i].y * scale);
   }
 
-  // End cap (half circle)
   const lastPoint = smoothed[smoothed.length - 1];
   const endRadius = computeRadius(lastPoint, null, stroke.tool, stroke.baseWidth, smoothed.length - 1, smoothed.length);
   ctx.arc(lastPoint.x * scale, lastPoint.y * scale, endRadius * scale, 0, Math.PI * 2, false);
 
-  // Trace right outline backward
   ctx.moveTo(rightOutline[rightOutline.length - 1].x * scale, rightOutline[rightOutline.length - 1].y * scale);
   for (let i = rightOutline.length - 2; i >= 0; i--) {
     ctx.lineTo(rightOutline[i].x * scale, rightOutline[i].y * scale);
   }
 
-  // Start cap (half circle)
   const firstPoint = smoothed[0];
   const startRadius = computeRadius(firstPoint, null, stroke.tool, stroke.baseWidth, 0, smoothed.length);
   ctx.arc(firstPoint.x * scale, firstPoint.y * scale, startRadius * scale, 0, Math.PI * 2, false);

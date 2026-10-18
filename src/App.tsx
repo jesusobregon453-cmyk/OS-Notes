@@ -8,31 +8,41 @@ import type {
   ViewportState,
   Stroke,
   AudioRecordingState,
+  NotebookCover,
+  NotebookSummary,
 } from './types';
 import {
   createDefaultNotebook,
   createNewPage,
-  saveToLocalStorage,
-  loadFromLocalStorage,
   exportToOsNotesFile,
   importFromOsNotesFile,
 } from './engine/document';
+import {
+  getAllNotebookSummaries,
+  loadNotebookById,
+  saveNotebookToDB,
+  deleteNotebookFromDB,
+  duplicateNotebookInDB,
+} from './engine/storage';
 import { drawPageTemplate } from './engine/templates';
 import { renderStroke } from './engine/inking';
 import { AudioSyncEngine } from './engine/audio';
 import { Toolbar } from './components/Toolbar';
 import { Canvas } from './components/Canvas';
+import { LibraryView } from './components/LibraryView';
+import { PageManagerModal } from './components/PageManagerModal';
 
 export const App: React.FC = () => {
-  const [doc, setDoc] = useState<NotebookDocument>(() => {
-    return loadFromLocalStorage() || createDefaultNotebook('Mi Cuaderno OS Notes');
-  });
-
+  const [viewMode, setViewMode] = useState<'library' | 'editor'>('library');
+  const [notebookSummaries, setNotebookSummaries] = useState<NotebookSummary[]>([]);
+  const [doc, setDoc] = useState<NotebookDocument>(() => createDefaultNotebook('Mi Cuaderno OS Notes'));
   const [currentPageIndex, setCurrentPageIndex] = useState<number>(0);
   const [currentTool, setCurrentTool] = useState<ToolType>('fountain');
   const [currentColor, setCurrentColor] = useState<string>('#0f172a');
   const [currentWidth, setCurrentWidth] = useState<number>(2.5);
   const [viewport, setViewport] = useState<ViewportState>({ zoom: 1.0, offsetX: 0, offsetY: 0 });
+  const [isPageManagerOpen, setIsPageManagerOpen] = useState<boolean>(false);
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving'>('saved');
 
   // Audio Sync State
   const [audioState, setAudioState] = useState<AudioRecordingState>({
@@ -50,28 +60,71 @@ export const App: React.FC = () => {
     });
   }, []);
 
-  // Undo / Redo history per page
+  // Undo / Redo history
   const undoStackRef = useRef<Stroke[][]>([]);
   const redoStackRef = useRef<Stroke[][]>([]);
   const [, setHistoryVersion] = useState(0);
 
+  // Initialize Library from IndexedDB
+  const refreshLibrary = useCallback(async () => {
+    try {
+      const summaries = await getAllNotebookSummaries();
+      if (summaries.length === 0) {
+        // Create initial default notebook
+        const defaultDoc = createDefaultNotebook('Primer Cuaderno');
+        await saveNotebookToDB(defaultDoc);
+        const updated = await getAllNotebookSummaries();
+        setNotebookSummaries(updated);
+        setDoc(defaultDoc);
+      } else {
+        setNotebookSummaries(summaries);
+      }
+    } catch (err) {
+      console.error('Error accessing IndexedDB:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshLibrary();
+  }, [refreshLibrary]);
+
   const currentPage = doc.pages[currentPageIndex] || doc.pages[0];
 
-  // Auto-save to localStorage
+  // Auto-save notebook changes to IndexedDB
+  const saveTimeoutRef = useRef<number | null>(null);
+
   useEffect(() => {
-    saveToLocalStorage(doc);
+    if (!doc.id) return;
+    setSaveStatus('saving');
+
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    saveTimeoutRef.current = window.setTimeout(async () => {
+      try {
+        await saveNotebookToDB(doc);
+        setSaveStatus('saved');
+      } catch (err) {
+        console.error('Failed to auto-save notebook to IndexedDB:', err);
+      }
+    }, 600);
+
+    return () => {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    };
   }, [doc]);
 
-  // Adjust ink color default when switching to dark themes
+  // Handle ink color default on theme change
   useEffect(() => {
     if ((currentPage.theme === 'dark' || currentPage.theme === 'chalkboard') && currentColor === '#0f172a') {
-      setCurrentColor('#f8fafc'); // Invert to crisp white
+      setCurrentColor('#f8fafc');
     } else if (currentPage.theme === 'white' && currentColor === '#f8fafc') {
-      setCurrentColor('#0f172a'); // Invert back to black
+      setCurrentColor('#0f172a');
     }
   }, [currentPage.theme, currentColor]);
 
-  // Handle Page Stroke Updates
+  // Page Stroke Updates
   const handlePageUpdate = useCallback(
     (updatedPage: Page) => {
       undoStackRef.current.push([...currentPage.strokes]);
@@ -91,7 +144,7 @@ export const App: React.FC = () => {
     [currentPage.strokes, currentPageIndex]
   );
 
-  // Undo
+  // Undo / Redo
   const handleUndo = useCallback(() => {
     if (undoStackRef.current.length === 0) return;
     const previousStrokes = undoStackRef.current.pop()!;
@@ -108,7 +161,6 @@ export const App: React.FC = () => {
     });
   }, [currentPage, currentPageIndex]);
 
-  // Redo
   const handleRedo = useCallback(() => {
     if (redoStackRef.current.length === 0) return;
     const nextStrokes = redoStackRef.current.pop()!;
@@ -127,6 +179,8 @@ export const App: React.FC = () => {
 
   // Keyboard Shortcuts
   useEffect(() => {
+    if (viewMode !== 'editor') return;
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
         e.preventDefault();
@@ -137,8 +191,12 @@ export const App: React.FC = () => {
         handleRedo();
       } else if (e.key === 'p' && !e.metaKey && !e.ctrlKey) {
         setCurrentTool('fountain');
+      } else if (e.key === 'c' && !e.metaKey && !e.ctrlKey) {
+        setCurrentTool('calligraphy');
       } else if (e.key === 'b' && !e.metaKey && !e.ctrlKey) {
         setCurrentTool('pen');
+      } else if (e.key === 'g' && !e.metaKey && !e.ctrlKey) {
+        setCurrentTool('pencil');
       } else if (e.key === 'h' && !e.metaKey && !e.ctrlKey) {
         setCurrentTool('highlighter');
       } else if (e.key === 's' && !e.metaKey && !e.ctrlKey) {
@@ -154,11 +212,69 @@ export const App: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleUndo, handleRedo]);
+  }, [viewMode, handleUndo, handleRedo]);
+
+  // Library Actions
+  const handleOpenNotebook = async (id: string) => {
+    const loaded = await loadNotebookById(id);
+    if (loaded) {
+      setDoc(loaded);
+      setCurrentPageIndex(0);
+      undoStackRef.current = [];
+      redoStackRef.current = [];
+      setViewMode('editor');
+    }
+  };
+
+  const handleBackToLibrary = async () => {
+    await saveNotebookToDB(doc);
+    await refreshLibrary();
+    setViewMode('library');
+  };
+
+  const handleCreateNotebook = async (
+    title: string,
+    cover: NotebookCover,
+    template: PageTemplate,
+    theme: PaperTheme
+  ) => {
+    const newDoc: NotebookDocument = {
+      id: `osnotes-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      title,
+      cover,
+      canvasMode: 'paged',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      pages: [createNewPage(1, template, theme)],
+    };
+
+    await saveNotebookToDB(newDoc);
+    setDoc(newDoc);
+    setCurrentPageIndex(0);
+    undoStackRef.current = [];
+    redoStackRef.current = [];
+    setViewMode('editor');
+    await refreshLibrary();
+  };
+
+  const handleDuplicateNotebook = async (id: string) => {
+    await duplicateNotebookInDB(id);
+    await refreshLibrary();
+  };
+
+  const handleDeleteNotebook = async (id: string) => {
+    if (confirm('¿Estás seguro de que deseas eliminar este cuaderno?')) {
+      await deleteNotebookFromDB(id);
+      await refreshLibrary();
+    }
+  };
 
   // Page Controls
-  const handleAddPage = () => {
-    const newPage = createNewPage(doc.pages.length + 1, currentPage.template, currentPage.theme);
+  const handleAddPage = (
+    template: PageTemplate = currentPage.template,
+    theme: PaperTheme = currentPage.theme
+  ) => {
+    const newPage = createNewPage(doc.pages.length + 1, template, theme);
     setDoc((prev) => ({
       ...prev,
       pages: [...prev.pages, newPage],
@@ -167,6 +283,27 @@ export const App: React.FC = () => {
     undoStackRef.current = [];
     redoStackRef.current = [];
     setHistoryVersion((v) => v + 1);
+  };
+
+  const handleDuplicatePage = (index: number) => {
+    const target = doc.pages[index];
+    const clone: Page = {
+      ...target,
+      id: `page-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      pageNumber: doc.pages.length + 1,
+      strokes: JSON.parse(JSON.stringify(target.strokes)),
+    };
+    const nextPages = [...doc.pages];
+    nextPages.splice(index + 1, 0, clone);
+    setDoc((prev) => ({ ...prev, pages: nextPages }));
+    setCurrentPageIndex(index + 1);
+  };
+
+  const handleDeletePage = (index: number) => {
+    if (doc.pages.length <= 1) return;
+    const nextPages = doc.pages.filter((_, idx) => idx !== index);
+    setDoc((prev) => ({ ...prev, pages: nextPages }));
+    setCurrentPageIndex(Math.max(0, index - 1));
   };
 
   const handlePrevPage = () => {
@@ -209,7 +346,6 @@ export const App: React.FC = () => {
     });
   };
 
-  // Add Sticky Note
   const handleAddStickyNoteAt = (x: number, y: number) => {
     const newNote = {
       id: `sticky-${Date.now()}`,
@@ -222,35 +358,27 @@ export const App: React.FC = () => {
     };
     const notes = [...(currentPage.stickyNotes || []), newNote];
     handlePageUpdate({ ...currentPage, stickyNotes: notes });
-    setCurrentTool('fountain'); // Revert to pen after dropping note
+    setCurrentTool('fountain');
   };
 
   // Audio Sync Actions
   const handleStartAudio = async () => {
-    if (audioEngineRef.current) {
-      await audioEngineRef.current.startRecording();
-    }
+    if (audioEngineRef.current) await audioEngineRef.current.startRecording();
   };
 
   const handleStopAudio = () => {
-    if (audioEngineRef.current) {
-      audioEngineRef.current.stopRecording();
-    }
+    if (audioEngineRef.current) audioEngineRef.current.stopRecording();
   };
 
   const handlePlayAudio = () => {
-    if (audioEngineRef.current) {
-      audioEngineRef.current.playAudio();
-    }
+    if (audioEngineRef.current) audioEngineRef.current.playAudio();
   };
 
   const handlePauseAudio = () => {
-    if (audioEngineRef.current) {
-      audioEngineRef.current.pauseAudio();
-    }
+    if (audioEngineRef.current) audioEngineRef.current.pauseAudio();
   };
 
-  // Export to .osnotes file
+  // Export & Import
   const handleExport = async () => {
     const blob = await exportToOsNotesFile(doc);
     const url = URL.createObjectURL(blob);
@@ -261,7 +389,6 @@ export const App: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  // Export current page to crisp PNG
   const handleExportImage = () => {
     const tempCanvas = document.createElement('canvas');
     tempCanvas.width = currentPage.width * 2;
@@ -281,80 +408,121 @@ export const App: React.FC = () => {
     a.click();
   };
 
-  // Import from .osnotes file
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
       const importedDoc = await importFromOsNotesFile(file);
+      await saveNotebookToDB(importedDoc);
       setDoc(importedDoc);
       setCurrentPageIndex(0);
       undoStackRef.current = [];
       redoStackRef.current = [];
-      setHistoryVersion((v) => v + 1);
+      setViewMode('editor');
+      await refreshLibrary();
     } catch (err) {
       alert(`Error al abrir archivo: ${(err as Error).message}`);
     }
     e.target.value = '';
   };
 
+  const handleExportNotebookById = async (id: string) => {
+    const targetDoc = await loadNotebookById(id);
+    if (!targetDoc) return;
+    const blob = await exportToOsNotesFile(targetDoc);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${targetDoc.title.replace(/\s+/g, '_') || 'cuaderno'}.osnotes`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="flex flex-col w-screen h-screen overflow-hidden bg-slate-950 font-sans">
-      <Toolbar
-        title={doc.title}
-        onTitleChange={(title) => setDoc((prev) => ({ ...prev, title }))}
-        currentTool={currentTool}
-        onSelectTool={setCurrentTool}
-        currentColor={currentColor}
-        onSelectColor={setCurrentColor}
-        currentWidth={currentWidth}
-        onSelectWidth={setCurrentWidth}
-        currentPageIndex={currentPageIndex}
-        totalPages={doc.pages.length}
-        onPrevPage={handlePrevPage}
-        onNextPage={handleNextPage}
-        onAddPage={handleAddPage}
-        currentTemplate={currentPage.template}
-        onSelectTemplate={handleSelectTemplate}
-        currentTheme={currentPage.theme || 'white'}
-        onSelectTheme={handleSelectTheme}
-        canvasMode={doc.canvasMode || 'paged'}
-        onToggleCanvasMode={() =>
-          setDoc((prev) => ({
-            ...prev,
-            canvasMode: prev.canvasMode === 'paged' ? 'infinite' : 'paged',
-          }))
-        }
-        audioState={audioState}
-        onStartAudioRecording={handleStartAudio}
-        onStopAudioRecording={handleStopAudio}
-        onPlayAudio={handlePlayAudio}
-        onPauseAudio={handlePauseAudio}
-        canUndo={undoStackRef.current.length > 0}
-        canRedo={redoStackRef.current.length > 0}
-        onUndo={handleUndo}
-        onRedo={handleRedo}
-        viewport={viewport}
-        onViewportChange={setViewport}
-        onExport={handleExport}
-        onExportImage={handleExportImage}
-        onImport={handleImport}
-      />
-
-      <main className="flex-1 relative flex overflow-hidden">
-        <Canvas
-          page={currentPage}
-          currentTool={currentTool}
-          currentColor={currentColor}
-          currentWidth={currentWidth}
-          viewport={viewport}
-          isAudioRecording={audioState.isRecording}
-          audioElapsed={audioState.duration}
-          onPageUpdate={handlePageUpdate}
-          onViewportChange={setViewport}
-          onAddStickyNoteAt={handleAddStickyNoteAt}
+      {viewMode === 'library' ? (
+        <LibraryView
+          notebooks={notebookSummaries}
+          onOpenNotebook={handleOpenNotebook}
+          onCreateNotebook={handleCreateNotebook}
+          onDuplicateNotebook={handleDuplicateNotebook}
+          onDeleteNotebook={handleDeleteNotebook}
+          onExportNotebook={handleExportNotebookById}
+          onImportNotebook={handleImport}
         />
-      </main>
+      ) : (
+        <>
+          <Toolbar
+            title={doc.title}
+            onTitleChange={(title) => setDoc((prev) => ({ ...prev, title }))}
+            onBackToLibrary={handleBackToLibrary}
+            onOpenPageManager={() => setIsPageManagerOpen(true)}
+            currentTool={currentTool}
+            onSelectTool={setCurrentTool}
+            currentColor={currentColor}
+            onSelectColor={setCurrentColor}
+            currentWidth={currentWidth}
+            onSelectWidth={setCurrentWidth}
+            currentPageIndex={currentPageIndex}
+            totalPages={doc.pages.length}
+            onPrevPage={handlePrevPage}
+            onNextPage={handleNextPage}
+            onAddPage={() => handleAddPage(currentPage.template, currentPage.theme)}
+            currentTemplate={currentPage.template}
+            onSelectTemplate={handleSelectTemplate}
+            currentTheme={currentPage.theme || 'white'}
+            onSelectTheme={handleSelectTheme}
+            canvasMode={doc.canvasMode || 'paged'}
+            onToggleCanvasMode={() =>
+              setDoc((prev) => ({
+                ...prev,
+                canvasMode: prev.canvasMode === 'paged' ? 'infinite' : 'paged',
+              }))
+            }
+            audioState={audioState}
+            onStartAudioRecording={handleStartAudio}
+            onStopAudioRecording={handleStopAudio}
+            onPlayAudio={handlePlayAudio}
+            onPauseAudio={handlePauseAudio}
+            canUndo={undoStackRef.current.length > 0}
+            canRedo={redoStackRef.current.length > 0}
+            onUndo={handleUndo}
+            onRedo={handleRedo}
+            viewport={viewport}
+            onViewportChange={setViewport}
+            onExport={handleExport}
+            onExportImage={handleExportImage}
+            saveStatus={saveStatus}
+          />
+
+          <main className="flex-1 relative flex overflow-hidden">
+            <Canvas
+              page={currentPage}
+              currentTool={currentTool}
+              currentColor={currentColor}
+              currentWidth={currentWidth}
+              viewport={viewport}
+              isAudioRecording={audioState.isRecording}
+              audioElapsed={audioState.duration}
+              onPageUpdate={handlePageUpdate}
+              onViewportChange={setViewport}
+              onAddStickyNoteAt={handleAddStickyNoteAt}
+            />
+          </main>
+
+          {/* Page Manager Modal */}
+          <PageManagerModal
+            pages={doc.pages}
+            currentPageIndex={currentPageIndex}
+            isOpen={isPageManagerOpen}
+            onClose={() => setIsPageManagerOpen(false)}
+            onSelectPage={(idx) => setCurrentPageIndex(idx)}
+            onAddPage={(template, theme) => handleAddPage(template, theme)}
+            onDuplicatePage={handleDuplicatePage}
+            onDeletePage={handleDeletePage}
+          />
+        </>
+      )}
     </div>
   );
 };
