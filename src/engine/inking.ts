@@ -193,18 +193,56 @@ export function renderStroke(
   ctx.strokeStyle = stroke.color;
   ctx.fillStyle = stroke.color;
 
-  // Render optional translucent shape background fill (Goodnotes Shapes feature)
-  if (stroke.fillColor && points.length >= 3) {
-    ctx.save();
-    ctx.fillStyle = stroke.fillColor;
+  // Pure Geometric Shape Rendering (Rectangles, Triangles, Circles, Lines, Arrows, Diamonds, Capsules)
+  if (stroke.tool === 'shape' || stroke.shapeType) {
+    ctx.lineWidth = Math.max(1, stroke.baseWidth * scale);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
     ctx.beginPath();
     ctx.moveTo(points[0].x * scale, points[0].y * scale);
     for (let i = 1; i < points.length; i++) {
       ctx.lineTo(points[i].x * scale, points[i].y * scale);
     }
-    ctx.closePath();
-    ctx.fill();
+
+    const isNonClosed = stroke.shapeType === 'line' || stroke.shapeType === 'arrow';
+    if (!isNonClosed && points.length >= 3) {
+      ctx.closePath();
+    }
+
+    if (stroke.fillColor && !isNonClosed && points.length >= 3) {
+      ctx.save();
+      ctx.fillStyle = stroke.fillColor;
+      ctx.fill();
+      ctx.restore();
+    }
+
+    ctx.stroke();
+
+    // Render arrowhead for arrow shapes
+    if (stroke.shapeType === 'arrow' && points.length >= 2) {
+      const pStart = points[0];
+      const pEnd = points[points.length - 1];
+      const angle = Math.atan2(pEnd.y - pStart.y, pEnd.x - pStart.x);
+      const arrowHeadLength = Math.max(14, stroke.baseWidth * 3.5) * scale;
+      const arrowAngle = Math.PI / 6;
+
+      ctx.beginPath();
+      ctx.moveTo(pEnd.x * scale, pEnd.y * scale);
+      ctx.lineTo(
+        (pEnd.x * scale) - arrowHeadLength * Math.cos(angle - arrowAngle),
+        (pEnd.y * scale) - arrowHeadLength * Math.sin(angle - arrowAngle)
+      );
+      ctx.moveTo(pEnd.x * scale, pEnd.y * scale);
+      ctx.lineTo(
+        (pEnd.x * scale) - arrowHeadLength * Math.cos(angle + arrowAngle),
+        (pEnd.y * scale) - arrowHeadLength * Math.sin(angle + arrowAngle)
+      );
+      ctx.stroke();
+    }
+
     ctx.restore();
+    return;
   }
 
   // Single dot

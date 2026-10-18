@@ -667,34 +667,82 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             {/* SUB-TOOLBAR CONTENT WHEN SHAPES IS ACTIVE */}
             {currentTool === 'shape' && (
               <>
-                {/* Fill Toggle */}
+                {/* Auto Detection Mode vs Explicit Shape Buttons */}
                 <button
-                  onClick={() => onShapeFillChange(!shapeFill)}
-                  className={`p-1.5 rounded-lg text-xs font-medium transition ${
-                    shapeFill ? 'bg-blue-100 text-blue-700' : 'text-slate-500 hover:bg-slate-100'
+                  onClick={() => onSelectedShapeChange('auto')}
+                  className={`flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-semibold transition ${
+                    selectedShape === 'auto'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                   }`}
-                  title="Relleno de color"
+                  title="Dibuja a mano alzada y Goodnotes lo convertirá automáticamente en figura perfecta"
                 >
-                  <span className="font-bold">⧉ Relleno</span>
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Auto</span>
                 </button>
 
                 <div className="h-4 w-px bg-slate-200" />
 
-                {/* Shapes Presets */}
+                {/* Fill Toggle */}
+                <button
+                  onClick={() => onShapeFillChange(!shapeFill)}
+                  className={`px-2 py-1 rounded-full text-xs font-semibold transition ${
+                    shapeFill ? 'bg-blue-100 text-blue-700 ring-1 ring-blue-300' : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                  title="Relleno automático translúcido"
+                >
+                  <span>⧉ Relleno</span>
+                </button>
+
+                <div className="h-4 w-px bg-slate-200" />
+
+                {/* Shape Presets */}
                 <div className="flex items-center space-x-1">
-                  {(['rect', 'circle', 'triangle', 'diamond', 'capsule'] as const).map((s) => (
+                  {(
+                    [
+                      { id: 'rect', label: '▭', title: 'Rectángulo' },
+                      { id: 'circle', label: '○', title: 'Círculo / Óvalo' },
+                      { id: 'triangle', label: '△', title: 'Triángulo' },
+                      { id: 'diamond', label: '◇', title: 'Rombo' },
+                      { id: 'line', label: '──', title: 'Línea recta' },
+                      { id: 'arrow', label: '➔', title: 'Flecha' },
+                    ] as const
+                  ).map((s) => (
                     <button
-                      key={s}
-                      onClick={() => onSelectedShapeChange(s)}
+                      key={s.id}
+                      onClick={() => onSelectedShapeChange(s.id)}
                       className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold transition ${
-                        selectedShape === s ? 'bg-blue-50 text-blue-600 border border-blue-300' : 'text-slate-600 hover:bg-slate-100'
+                        selectedShape === s.id
+                          ? 'bg-blue-50 text-blue-600 border border-blue-400 shadow-xs'
+                          : 'text-slate-600 hover:bg-slate-100'
                       }`}
+                      title={s.title}
                     >
-                      {s === 'rect' && '▭'}
-                      {s === 'circle' && '○'}
-                      {s === 'triangle' && '△'}
-                      {s === 'diamond' && '◇'}
-                      {s === 'capsule' && '⬯'}
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="h-4 w-px bg-slate-200" />
+
+                {/* Width Presets */}
+                <div className="flex items-center space-x-1">
+                  {[2.0, 4.0, 8.0].map((w) => (
+                    <button
+                      key={w}
+                      onClick={() => onSelectWidth(w)}
+                      className={`w-6 h-6 rounded-full flex items-center justify-center transition ${
+                        currentWidth === w ? 'bg-slate-100 ring-2 ring-blue-500' : 'hover:bg-slate-50'
+                      }`}
+                      title={`${w} mm`}
+                    >
+                      <span
+                        className="bg-slate-800 rounded-full"
+                        style={{
+                          width: `${Math.min(14, Math.max(3, w * 1.5))}px`,
+                          height: `${Math.min(14, Math.max(3, w * 1.5))}px`,
+                        }}
+                      />
                     </button>
                   ))}
                 </div>
@@ -702,7 +750,11 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 <div className="h-4 w-px bg-slate-200" />
 
                 {/* Color Dot */}
-                <label className="w-6 h-6 rounded-full border border-slate-300 cursor-pointer block" style={{ backgroundColor: currentColor }}>
+                <label
+                  className="w-6 h-6 rounded-full border border-slate-300 cursor-pointer block hover:scale-110 transition shadow-xs"
+                  style={{ backgroundColor: currentColor }}
+                  title="Cambiar color del trazo"
+                >
                   <input type="color" onChange={(e) => onSelectColor(e.target.value)} className="hidden" />
                 </label>
               </>

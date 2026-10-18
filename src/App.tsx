@@ -60,7 +60,7 @@ export const App: React.FC = () => {
   const [eraserMode, setEraserMode] = useState<EraserMode>('standard');
   const [eraseHighlighterOnly, setEraseHighlighterOnly] = useState<boolean>(false);
   const [shapeFill, setShapeFill] = useState<boolean>(false);
-  const [selectedShape, setSelectedShape] = useState<ShapeKind>('rect');
+  const [selectedShape, setSelectedShape] = useState<ShapeKind>('auto');
   const [laserMode, setLaserMode] = useState<LaserMode>('trail');
   const [textOptions, setTextOptions] = useState<TextOptions>({
     fontSize: 24,

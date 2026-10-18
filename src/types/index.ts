@@ -48,9 +48,12 @@ export type DetectedShapeType =
   | 'line'
   | 'arrow'
   | 'rectangle'
+  | 'rect'
   | 'circle'
   | 'ellipse'
-  | 'triangle';
+  | 'triangle'
+  | 'diamond'
+  | 'capsule';
 
 export interface BoundingBox {
   minX: number;
@@ -61,7 +64,15 @@ export interface BoundingBox {
 
 export type EraserMode = 'standard' | 'stroke' | 'precision';
 export type LaserMode = 'dot' | 'trail';
-export type ShapeKind = 'auto' | 'rect' | 'circle' | 'triangle' | 'diamond' | 'capsule';
+export type ShapeKind =
+  | 'auto'
+  | 'rect'
+  | 'circle'
+  | 'triangle'
+  | 'diamond'
+  | 'line'
+  | 'arrow'
+  | 'capsule';
 
 export interface TextOptions {
   fontSize: number;

@@ -1,4 +1,4 @@
-import type { Point, DetectedShapeType } from '../types';
+import type { Point, DetectedShapeType, ShapeKind } from '../types';
 import { distance } from './inking';
 
 /**
@@ -13,13 +13,57 @@ export function calculatePathLength(points: Point[]): number {
 }
 
 /**
- * Attempts to recognize geometric shapes from a sequence of raw or smoothed points
+ * Distance from point (px, py) to line segment (x1, y1)-(x2, y2)
+ */
+function distToSegment(
+  px: number,
+  py: number,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number
+): number {
+  const l2 = (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1);
+  if (l2 === 0) return Math.hypot(px - x1, py - y1);
+  let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (x1 + t * (x2 - x1)), py - (y1 + t * (y2 - y1)));
+}
+
+/**
+ * Average distance from points to a polygon perimeter
+ */
+function averageDistToPolygon(
+  points: Point[],
+  vertices: { x: number; y: number }[]
+): number {
+  let total = 0;
+  for (const p of points) {
+    let minDist = Infinity;
+    for (let i = 0; i < vertices.length - 1; i++) {
+      const d = distToSegment(
+        p.x,
+        p.y,
+        vertices[i].x,
+        vertices[i].y,
+        vertices[i + 1].x,
+        vertices[i + 1].y
+      );
+      if (d < minDist) minDist = d;
+    }
+    total += minDist;
+  }
+  return total / points.length;
+}
+
+/**
+ * Recognizes geometric shapes from user's hand-drawn ink points
  */
 export function detectGeometricShape(points: Point[]): {
   type: DetectedShapeType;
   perfectPoints: Point[];
 } {
-  if (points.length < 5) {
+  if (points.length < 4) {
     return { type: 'none', perfectPoints: points };
   }
 
@@ -28,138 +72,179 @@ export function detectGeometricShape(points: Point[]): {
   const totalLength = calculatePathLength(points);
   const directDistance = distance(pStart, pEnd);
 
-  // 1. Line Detection: direct distance is very close to path length
-  if (directDistance / totalLength > 0.88) {
-    // Generate clean straight line
-    const steps = 10;
-    const linePoints: Point[] = [];
-    for (let i = 0; i <= steps; i++) {
-      const t = i / steps;
-      linePoints.push({
-        x: pStart.x + (pEnd.x - pStart.x) * t,
-        y: pStart.y + (pEnd.y - pStart.y) * t,
-        pressure: (pStart.pressure + pEnd.pressure) / 2,
-        time: pStart.time + (pEnd.time - pStart.time) * t,
-      });
-    }
+  // 1. Straight Line Detection: direct distance is close to total stroke length
+  if (totalLength > 15 && directDistance / totalLength > 0.80) {
+    const linePoints: Point[] = [
+      { x: pStart.x, y: pStart.y, pressure: 0.5, time: pStart.time },
+      { x: pEnd.x, y: pEnd.y, pressure: 0.5, time: pEnd.time },
+    ];
     return { type: 'line', perfectPoints: linePoints };
   }
 
-  // 2. Closed Loop Detection (Start and End close to each other)
-  const isClosed = directDistance / totalLength < 0.22;
+  // 2. Closed Loop Detection
+  const isClosed = directDistance / totalLength < 0.35 || directDistance < 45;
+  if (!isClosed) {
+    return { type: 'none', perfectPoints: points };
+  }
 
-  if (isClosed) {
-    // Compute center and bounding box
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    let sumX = 0, sumY = 0;
+  // Compute bounding box and center
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  let sumX = 0, sumY = 0;
 
-    for (const p of points) {
-      if (p.x < minX) minX = p.x;
-      if (p.y < minY) minY = p.y;
-      if (p.x > maxX) maxX = p.x;
-      if (p.y > maxY) maxY = p.y;
-      sumX += p.x;
-      sumY += p.y;
-    }
+  for (const p of points) {
+    if (p.x < minX) minX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y > maxY) maxY = p.y;
+    sumX += p.x;
+    sumY += p.y;
+  }
 
-    const count = points.length;
-    const centerX = sumX / count;
-    const centerY = sumY / count;
-    const width = maxX - minX;
-    const height = maxY - minY;
-    const radiusX = width / 2;
-    const radiusY = height / 2;
+  const count = points.length;
+  const centerX = sumX / count;
+  const centerY = sumY / count;
+  const width = Math.max(12, maxX - minX);
+  const height = Math.max(12, maxY - minY);
+  const diag = Math.hypot(width, height) || 1;
+  const radiusX = width / 2;
+  const radiusY = height / 2;
+  const now = points[0].time;
 
-    // Check Circle / Ellipse: evaluate distance from center
-    let radiusDiffSum = 0;
-    for (const p of points) {
-      // Normalized distance in ellipse equation
-      const normDist = Math.hypot((p.x - centerX) / (radiusX || 1), (p.y - centerY) / (radiusY || 1));
-      radiusDiffSum += Math.abs(normDist - 1.0);
-    }
-    const ellipseError = radiusDiffSum / count;
+  // Candidate A: Circle / Ellipse
+  let radiusDiffSum = 0;
+  for (const p of points) {
+    const normDist = Math.hypot((p.x - centerX) / radiusX, (p.y - centerY) / radiusY);
+    radiusDiffSum += Math.abs(normDist - 1.0);
+  }
+  const ellipseError = radiusDiffSum / count;
 
-    if (ellipseError < 0.25) {
-      const isCircle = Math.abs(width - height) / Math.max(width, height) < 0.18;
-      const rX = isCircle ? (radiusX + radiusY) / 2 : radiusX;
-      const rY = isCircle ? rX : radiusY;
+  // Candidate B: Rectangle / Square
+  const rectCorners = [
+    { x: minX, y: minY },
+    { x: maxX, y: minY },
+    { x: maxX, y: maxY },
+    { x: minX, y: maxY },
+    { x: minX, y: minY },
+  ];
+  const rectError = averageDistToPolygon(points, rectCorners) / diag;
 
-      const circlePoints: Point[] = [];
-      const numSteps = 48;
-      const basePressure = points[0].pressure || 0.5;
+  // Candidate C: Triangle
+  // Find top vertex, bottom-right vertex, and bottom-left vertex
+  let pTop = points[0];
+  let pBottomLeft = points[0];
+  let pBottomRight = points[0];
 
-      for (let i = 0; i <= numSteps; i++) {
-        const theta = (i / numSteps) * Math.PI * 2;
-        circlePoints.push({
-          x: centerX + rX * Math.cos(theta),
-          y: centerY + rY * Math.sin(theta),
-          pressure: basePressure,
-          time: points[0].time + i * 10,
-        });
-      }
+  for (const p of points) {
+    if (p.y < pTop.y) pTop = p;
+    if (p.x - p.y < pBottomLeft.x - pBottomLeft.y) pBottomLeft = p;
+    if (p.x + p.y > pBottomRight.x + pBottomRight.y) pBottomRight = p;
+  }
 
-      return {
-        type: isCircle ? 'circle' : 'ellipse',
-        perfectPoints: circlePoints,
-      };
-    }
+  const triangleVertices = [
+    { x: pTop.x, y: pTop.y },
+    { x: pBottomRight.x, pBottomRight: pBottomRight.y },
+    { x: pBottomLeft.x, y: pBottomLeft.y },
+    { x: pTop.x, y: pTop.y },
+  ].map((v) => ({ x: v.x, y: (v as any).pBottomRight || v.y }));
 
-    // 3. Rectangle / Square Detection
-    // Check if points stay close to the bounding box perimeter
-    let boxDistSum = 0;
-    for (const p of points) {
-      const distLeft = Math.abs(p.x - minX);
-      const distRight = Math.abs(p.x - maxX);
-      const distTop = Math.abs(p.y - minY);
-      const distBottom = Math.abs(p.y - maxY);
-      const minDistToEdge = Math.min(distLeft, distRight, distTop, distBottom);
-      boxDistSum += minDistToEdge;
-    }
-    const boxError = boxDistSum / (count * ((width + height) / 4 || 1));
+  const triangleError = averageDistToPolygon(points, triangleVertices) / diag;
 
-    if (boxError < 0.22) {
-      const rectCorners = [
-        { x: minX, y: minY },
-        { x: maxX, y: minY },
-        { x: maxX, y: maxY },
-        { x: minX, y: maxY },
-        { x: minX, y: minY },
-      ];
-      const rectPoints: Point[] = [];
-      const basePressure = points[0].pressure || 0.5;
+  // Candidate D: Diamond
+  const diamondVertices = [
+    { x: centerX, y: minY },
+    { x: maxX, y: centerY },
+    { x: centerX, y: maxY },
+    { x: minX, y: centerY },
+    { x: centerX, y: minY },
+  ];
+  const diamondError = averageDistToPolygon(points, diamondVertices) / diag;
 
-      for (let i = 0; i < rectCorners.length - 1; i++) {
-        const c1 = rectCorners[i];
-        const c2 = rectCorners[i + 1];
-        for (let s = 0; s < 8; s++) {
-          const t = s / 8;
-          rectPoints.push({
-            x: c1.x + (c2.x - c1.x) * t,
-            y: c1.y + (c2.y - c1.y) * t,
-            pressure: basePressure,
-            time: points[0].time,
-          });
-        }
-      }
-      rectPoints.push({
-        x: rectCorners[0].x,
-        y: rectCorners[0].y,
-        pressure: basePressure,
-        time: points[0].time,
+  // Determine best matching shape with error tolerance
+  const errors = [
+    { type: 'ellipse' as const, err: ellipseError },
+    { type: 'rectangle' as const, err: rectError },
+    { type: 'triangle' as const, err: triangleError },
+    { type: 'diamond' as const, err: diamondError },
+  ].sort((a, b) => a.err - b.err);
+
+  const best = errors[0];
+
+  if (best.type === 'ellipse' && best.err < 0.28) {
+    const isCircle = Math.abs(width - height) / Math.max(width, height) < 0.22;
+    const rX = isCircle ? (radiusX + radiusY) / 2 : radiusX;
+    const rY = isCircle ? rX : radiusY;
+
+    const circlePoints: Point[] = [];
+    const numSteps = 48;
+    for (let i = 0; i <= numSteps; i++) {
+      const theta = (i / numSteps) * Math.PI * 2;
+      circlePoints.push({
+        x: centerX + rX * Math.cos(theta),
+        y: centerY + rY * Math.sin(theta),
+        pressure: 0.5,
+        time: now,
       });
-
-      return { type: 'rectangle', perfectPoints: rectPoints };
     }
+
+    return {
+      type: isCircle ? 'circle' : 'ellipse',
+      perfectPoints: circlePoints,
+    };
+  }
+
+  if (best.type === 'rectangle' && best.err < 0.26) {
+    const isSquare = Math.abs(width - height) / Math.max(width, height) < 0.18;
+    const side = isSquare ? (width + height) / 2 : 0;
+    const l = isSquare ? centerX - side / 2 : minX;
+    const r = isSquare ? centerX + side / 2 : maxX;
+    const t = isSquare ? centerY - side / 2 : minY;
+    const b = isSquare ? centerY + side / 2 : maxY;
+
+    return {
+      type: 'rectangle',
+      perfectPoints: [
+        { x: l, y: t, pressure: 0.5, time: now },
+        { x: r, y: t, pressure: 0.5, time: now },
+        { x: r, y: b, pressure: 0.5, time: now },
+        { x: l, y: b, pressure: 0.5, time: now },
+        { x: l, y: t, pressure: 0.5, time: now },
+      ],
+    };
+  }
+
+  if (best.type === 'triangle' && best.err < 0.26) {
+    return {
+      type: 'triangle',
+      perfectPoints: [
+        { x: centerX, y: minY, pressure: 0.5, time: now },
+        { x: maxX, y: maxY, pressure: 0.5, time: now },
+        { x: minX, y: maxY, pressure: 0.5, time: now },
+        { x: centerX, y: minY, pressure: 0.5, time: now },
+      ],
+    };
+  }
+
+  if (best.type === 'diamond' && best.err < 0.26) {
+    return {
+      type: 'diamond',
+      perfectPoints: [
+        { x: centerX, y: minY, pressure: 0.5, time: now },
+        { x: maxX, y: centerY, pressure: 0.5, time: now },
+        { x: centerX, y: maxY, pressure: 0.5, time: now },
+        { x: minX, y: centerY, pressure: 0.5, time: now },
+        { x: centerX, y: minY, pressure: 0.5, time: now },
+      ],
+    };
   }
 
   return { type: 'none', perfectPoints: points };
 }
 
 /**
- * Generates exact geometric shapes from drag bounds
+ * Generates exact geometric shapes from drag start and end bounds
  */
 export function generateExplicitShape(
-  kind: 'rect' | 'circle' | 'triangle' | 'diamond' | 'capsule',
+  kind: ShapeKind,
   p1: Point,
   p2: Point
 ): Point[] {
@@ -167,11 +252,25 @@ export function generateExplicitShape(
   const maxX = Math.max(p1.x, p2.x);
   const minY = Math.min(p1.y, p2.y);
   const maxY = Math.max(p1.y, p2.y);
-  const width = Math.max(10, maxX - minX);
-  const height = Math.max(10, maxY - minY);
+  const width = Math.max(8, maxX - minX);
+  const height = Math.max(8, maxY - minY);
   const centerX = minX + width / 2;
   const centerY = minY + height / 2;
   const now = Date.now();
+
+  if (kind === 'line') {
+    return [
+      { x: p1.x, y: p1.y, pressure: 0.5, time: now },
+      { x: p2.x, y: p2.y, pressure: 0.5, time: now },
+    ];
+  }
+
+  if (kind === 'arrow') {
+    return [
+      { x: p1.x, y: p1.y, pressure: 0.5, time: now },
+      { x: p2.x, y: p2.y, pressure: 0.5, time: now },
+    ];
+  }
 
   if (kind === 'rect') {
     return [
@@ -187,8 +286,9 @@ export function generateExplicitShape(
     const rx = width / 2;
     const ry = height / 2;
     const points: Point[] = [];
-    for (let i = 0; i <= 36; i++) {
-      const angle = (i / 36) * Math.PI * 2;
+    const numSteps = 48;
+    for (let i = 0; i <= numSteps; i++) {
+      const angle = (i / numSteps) * Math.PI * 2;
       points.push({
         x: centerX + rx * Math.cos(angle),
         y: centerY + ry * Math.sin(angle),
@@ -219,12 +319,15 @@ export function generateExplicitShape(
   }
 
   if (kind === 'capsule') {
+    const rx = width / 2;
+    const ry = height / 2;
     const points: Point[] = [];
-    for (let i = 0; i <= 36; i++) {
-      const angle = (i / 36) * Math.PI * 2;
+    const numSteps = 48;
+    for (let i = 0; i <= numSteps; i++) {
+      const angle = (i / numSteps) * Math.PI * 2;
       points.push({
-        x: centerX + (width / 2) * Math.cos(angle),
-        y: centerY + (height / 2) * Math.sin(angle),
+        x: centerX + rx * Math.cos(angle),
+        y: centerY + ry * Math.sin(angle),
         pressure: 0.5,
         time: now,
       });

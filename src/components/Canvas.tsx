@@ -464,7 +464,10 @@ export const Canvas: React.FC<CanvasProps> = ({
         points: shapePoints,
         bounds: { minX: 0, minY: 0, maxX: 0, maxY: 0 },
         shapeType: selectedShape as any,
-        fillColor: shapeFill ? colorToRgba(currentColor, 0.22) : undefined,
+        fillColor:
+          shapeFill && selectedShape !== 'line' && selectedShape !== 'arrow'
+            ? colorToRgba(currentColor, 0.22)
+            : undefined,
       };
       renderStroke(ctx, tempStroke, 1.0);
     } else {
@@ -615,9 +618,14 @@ export const Canvas: React.FC<CanvasProps> = ({
       points: [...finalPoints],
       bounds,
       shapeType,
-      fillColor: shapeFill && shapeType && shapeType !== 'line' && shapeType !== 'none'
-        ? colorToRgba(currentColor, 0.22)
-        : undefined,
+      fillColor:
+        shapeFill &&
+        shapeType &&
+        shapeType !== 'line' &&
+        shapeType !== 'arrow' &&
+        shapeType !== 'none'
+          ? colorToRgba(currentColor, 0.22)
+          : undefined,
       audioTimestamp: isAudioRecording ? audioElapsed : undefined,
     };
 
