@@ -429,10 +429,10 @@ export const Canvas: React.FC<CanvasProps> = ({
       return;
     }
 
-    // Geometric Shape Recognition
+    // Geometric Shape Recognition: only if the Shape tool is selected
     let finalPoints = points;
     let shapeType = undefined;
-    if (currentTool === 'shape' || points.length > 10) {
+    if (currentTool === 'shape') {
       const detected = detectGeometricShape(points);
       if (detected.type !== 'none') {
         finalPoints = detected.perfectPoints;

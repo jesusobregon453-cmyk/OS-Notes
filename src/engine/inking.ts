@@ -43,17 +43,16 @@ export function computeRadius(
     angle = Math.atan2(point.y - prevPoint.y, point.x - prevPoint.x);
   }
 
-  // Velocity dampening
-  const vFactor = Math.max(0.35, 1.0 - Math.min(velocity / 3200, 0.65));
+  const vFactor = Math.max(0.4, 1.0 - Math.min(velocity / 3000, 0.6));
 
   if (tool === 'pen') {
-    // Ballpoint: consistent, clean ink flow with subtle pressure feedback
+    // Ballpoint: stable, consistent width with minor pressure response
     return (baseWidth / 2) * (0.85 + 0.3 * p);
   }
 
   if (tool === 'fountain') {
-    // Fountain Pen: fluid, expressive ink with start/end tapering
-    let radius = (baseWidth / 2) * (0.3 + 1.2 * p) * vFactor;
+    // Fountain Pen: fluid tapering and velocity/pressure dynamics
+    let radius = (baseWidth / 2) * (0.35 + 1.1 * p) * vFactor;
     if (index < 4 && totalPoints > 8) {
       radius *= (index + 1) / 5;
     } else if (index >= totalPoints - 4 && totalPoints > 8) {
@@ -63,7 +62,7 @@ export function computeRadius(
   }
 
   if (tool === 'calligraphy') {
-    // Calligraphy Chisel Nib: fixed 40 degree blade angle
+    // Calligraphy Chisel: 40 degree blade angle
     const nibAngle = (40 * Math.PI) / 180;
     const diffAngle = angle - nibAngle;
     const chiselFactor = Math.abs(Math.sin(diffAngle));
@@ -72,7 +71,7 @@ export function computeRadius(
   }
 
   if (tool === 'pencil') {
-    // Graphite Pencil: softer response, broader when tilted
+    // Graphite Pencil: tilt sensitivity and pressure
     const tilt = point.tiltX && point.tiltY ? Math.hypot(point.tiltX, point.tiltY) : 0;
     const tiltMultiplier = 1.0 + Math.min(tilt / 45, 0.8);
     return (baseWidth / 2) * (0.6 + 0.6 * p) * tiltMultiplier;
@@ -86,7 +85,7 @@ export function computeRadius(
 }
 
 /**
- * Smooths raw points using Catmull-Rom splines and sub-segment interpolation
+ * Smooths raw points using Catmull-Rom splines
  */
 export function smoothPoints(rawPoints: Point[]): Point[] {
   if (rawPoints.length < 3) return rawPoints;
@@ -100,7 +99,7 @@ export function smoothPoints(rawPoints: Point[]): Point[] {
     const p3 = i < rawPoints.length - 2 ? rawPoints[i + 2] : p2;
 
     const segDist = distance(p1, p2);
-    const steps = Math.min(8, Math.max(1, Math.floor(segDist / 3.5)));
+    const steps = Math.min(6, Math.max(1, Math.floor(segDist / 4)));
 
     for (let step = 1; step <= steps; step++) {
       const t = step / steps;
@@ -115,69 +114,6 @@ export function smoothPoints(rawPoints: Point[]): Point[] {
   }
 
   return smoothed;
-}
-
-/**
- * Generates ribbon polygon mesh from smoothed points
- */
-export function generateRibbonPolygon(
-  points: Point[],
-  tool: ToolType,
-  baseWidth: number
-): { leftOutline: Point[]; rightOutline: Point[] } {
-  const leftOutline: Point[] = [];
-  const rightOutline: Point[] = [];
-
-  const count = points.length;
-  if (count === 0) return { leftOutline, rightOutline };
-
-  const radii: number[] = new Array(count);
-  for (let i = 0; i < count; i++) {
-    radii[i] = computeRadius(points[i], i > 0 ? points[i - 1] : null, tool, baseWidth, i, count);
-  }
-
-  for (let i = 0; i < count; i++) {
-    const curr = points[i];
-    let dx = 0;
-    let dy = 0;
-
-    if (i === 0 && count > 1) {
-      dx = points[1].x - curr.x;
-      dy = points[1].y - curr.y;
-    } else if (i === count - 1 && count > 1) {
-      dx = curr.x - points[i - 1].x;
-      dy = curr.y - points[i - 1].y;
-    } else if (count > 2) {
-      dx = points[i + 1].x - points[i - 1].x;
-      dy = points[i + 1].y - points[i - 1].y;
-    }
-
-    const len = Math.hypot(dx, dy);
-    let nx = 0;
-    let ny = 1;
-
-    if (len > 0.0001) {
-      nx = -dy / len;
-      ny = dx / len;
-    }
-
-    const r = radii[i];
-    leftOutline.push({
-      x: curr.x + nx * r,
-      y: curr.y + ny * r,
-      pressure: curr.pressure,
-      time: curr.time,
-    });
-
-    rightOutline.push({
-      x: curr.x - nx * r,
-      y: curr.y - ny * r,
-      pressure: curr.pressure,
-      time: curr.time,
-    });
-  }
-
-  return { leftOutline, rightOutline };
 }
 
 export function calculateStrokeBounds(points: Point[], baseWidth: number): BoundingBox {
@@ -204,7 +140,9 @@ export function calculateStrokeBounds(points: Point[], baseWidth: number): Bound
 }
 
 /**
- * Master vector stroke renderer supporting Fountain, Calligraphy, Pencil, Ballpoint, and Highlighter
+ * Master vector stroke renderer:
+ * Renders smooth handwriting using continuous midpoint quadratic Bezier splines and round joins.
+ * Completely avoids polygon fill self-intersections or accidental lasso-like fills!
  */
 export function renderStroke(
   ctx: CanvasRenderingContext2D,
@@ -224,14 +162,19 @@ export function renderStroke(
   } else if (stroke.tool === 'pencil') {
     ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = stroke.opacity || 0.82;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
   } else {
     ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = stroke.opacity || 1.0;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
   }
 
-  ctx.fillStyle = stroke.color;
   ctx.strokeStyle = stroke.color;
+  ctx.fillStyle = stroke.color;
 
+  // Single dot
   if (points.length === 1) {
     const p = points[0];
     const r = Math.max(1, (stroke.baseWidth / 2) * (p.pressure || 0.5));
@@ -242,34 +185,67 @@ export function renderStroke(
     return;
   }
 
-  const smoothed = points.length > 3 ? smoothPoints(points) : points;
-  const { leftOutline, rightOutline } = generateRibbonPolygon(smoothed, stroke.tool, stroke.baseWidth);
-
-  if (leftOutline.length === 0) {
+  // 2 points line
+  if (points.length === 2) {
+    const p1 = points[0];
+    const p2 = points[1];
+    const r = computeRadius(p2, p1, stroke.tool, stroke.baseWidth, 1, 2);
+    ctx.lineWidth = Math.max(0.8, r * 2 * scale);
+    ctx.beginPath();
+    ctx.moveTo(p1.x * scale, p1.y * scale);
+    ctx.lineTo(p2.x * scale, p2.y * scale);
+    ctx.stroke();
     ctx.restore();
     return;
   }
 
-  ctx.beginPath();
-  ctx.moveTo(leftOutline[0].x * scale, leftOutline[0].y * scale);
+  const smoothed = points.length > 4 ? smoothPoints(points) : points;
+  const count = smoothed.length;
 
-  for (let i = 1; i < leftOutline.length; i++) {
-    ctx.lineTo(leftOutline[i].x * scale, leftOutline[i].y * scale);
+  // Midpoint quadratic curve rendering
+  for (let i = 0; i < count - 1; i++) {
+    const curr = smoothed[i];
+    const next = smoothed[i + 1];
+    const prev = i > 0 ? smoothed[i - 1] : null;
+
+    const r = computeRadius(next, curr, stroke.tool, stroke.baseWidth, i, count);
+    ctx.lineWidth = Math.max(0.8, r * 2 * scale);
+
+    ctx.beginPath();
+    if (i === 0) {
+      ctx.moveTo(curr.x * scale, curr.y * scale);
+      const midX = (curr.x + next.x) / 2;
+      const midY = (curr.y + next.y) / 2;
+      ctx.lineTo(midX * scale, midY * scale);
+    } else {
+      const prevMidX = (prev!.x + curr.x) / 2;
+      const prevMidY = (prev!.y + curr.y) / 2;
+      const nextMidX = (curr.x + next.x) / 2;
+      const nextMidY = (curr.y + next.y) / 2;
+      ctx.moveTo(prevMidX * scale, prevMidY * scale);
+      ctx.quadraticCurveTo(
+        curr.x * scale,
+        curr.y * scale,
+        nextMidX * scale,
+        nextMidY * scale
+      );
+    }
+    ctx.stroke();
   }
 
-  const lastPoint = smoothed[smoothed.length - 1];
-  const endRadius = computeRadius(lastPoint, null, stroke.tool, stroke.baseWidth, smoothed.length - 1, smoothed.length);
-  ctx.arc(lastPoint.x * scale, lastPoint.y * scale, endRadius * scale, 0, Math.PI * 2, false);
-
-  ctx.moveTo(rightOutline[rightOutline.length - 1].x * scale, rightOutline[rightOutline.length - 1].y * scale);
-  for (let i = rightOutline.length - 2; i >= 0; i--) {
-    ctx.lineTo(rightOutline[i].x * scale, rightOutline[i].y * scale);
+  // Final segment to end point
+  if (count > 2) {
+    const secondLast = smoothed[count - 2];
+    const last = smoothed[count - 1];
+    const midX = (secondLast.x + last.x) / 2;
+    const midY = (secondLast.y + last.y) / 2;
+    const r = computeRadius(last, secondLast, stroke.tool, stroke.baseWidth, count - 1, count);
+    ctx.lineWidth = Math.max(0.8, r * 2 * scale);
+    ctx.beginPath();
+    ctx.moveTo(midX * scale, midY * scale);
+    ctx.lineTo(last.x * scale, last.y * scale);
+    ctx.stroke();
   }
 
-  const firstPoint = smoothed[0];
-  const startRadius = computeRadius(firstPoint, null, stroke.tool, stroke.baseWidth, 0, smoothed.length);
-  ctx.arc(firstPoint.x * scale, firstPoint.y * scale, startRadius * scale, 0, Math.PI * 2, false);
-
-  ctx.fill();
   ctx.restore();
 }
