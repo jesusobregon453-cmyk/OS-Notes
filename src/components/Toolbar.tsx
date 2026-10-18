@@ -36,6 +36,10 @@ import type {
   PaperTheme,
   ViewportState,
   AudioRecordingState,
+  EraserMode,
+  LaserMode,
+  ShapeKind,
+  TextOptions,
 } from '../types';
 
 interface ToolbarProps {
@@ -67,8 +71,8 @@ interface ToolbarProps {
   audioState: AudioRecordingState;
   onStartAudioRecording: () => void;
   onStopAudioRecording: () => void;
-  onPlayAudio: () => void;
-  onPauseAudio: () => void;
+  onPlayAudio?: () => void;
+  onPauseAudio?: () => void;
   canUndo: boolean;
   canRedo: boolean;
   onUndo: () => void;
@@ -81,6 +85,19 @@ interface ToolbarProps {
   onDuplicatePage: () => void;
   onImageInsert?: (dataUrl: string) => void;
   saveStatus: 'saved' | 'saving';
+  // Subcontrols
+  eraserMode: EraserMode;
+  onEraserModeChange: (mode: EraserMode) => void;
+  eraseHighlighterOnly: boolean;
+  onEraseHighlighterOnlyChange: (val: boolean) => void;
+  shapeFill: boolean;
+  onShapeFillChange: (val: boolean) => void;
+  selectedShape: ShapeKind;
+  onSelectedShapeChange: (shape: ShapeKind) => void;
+  laserMode: LaserMode;
+  onLaserModeChange: (mode: LaserMode) => void;
+  textOptions: TextOptions;
+  onTextOptionsChange: (opts: TextOptions) => void;
 }
 
 const PASTEL_STICKY_COLORS = [
@@ -135,6 +152,18 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onDuplicatePage,
   onImageInsert,
   saveStatus,
+  eraserMode,
+  onEraserModeChange,
+  eraseHighlighterOnly,
+  onEraseHighlighterOnlyChange,
+  shapeFill,
+  onShapeFillChange,
+  selectedShape,
+  onSelectedShapeChange,
+  laserMode,
+  onLaserModeChange,
+  textOptions,
+  onTextOptionsChange,
 }) => {
   // Popover States
   const [activePopover, setActivePopover] = useState<
@@ -150,17 +179,6 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
   // Sub-instrument for pen
   const [penSubtype, setPenSubtype] = useState<'fountain' | 'pen' | 'calligraphy' | 'pencil' | 'highlighter'>('fountain');
-  const [laserMode, setLaserMode] = useState<'dot' | 'trail'>('trail');
-  const [eraserMode, setEraserMode] = useState<'standard' | 'stroke' | 'precision'>('standard');
-  const [eraseHighlighterOnly, setEraseHighlighterOnly] = useState(false);
-  const [shapeFill, setShapeFill] = useState(false);
-  const [selectedShape, setSelectedShape] = useState<'rect' | 'circle' | 'triangle' | 'diamond' | 'capsule'>('rect');
-
-  // Text options
-  const [textSize, setTextSize] = useState(24);
-  const [textFamily, setTextFamily] = useState('Moderna');
-  const [isBold, setIsBold] = useState(false);
-  const [isItalic, setIsItalic] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -599,7 +617,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               <>
                 <button
                   onClick={() =>
-                    setEraserMode(eraserMode === 'standard' ? 'stroke' : eraserMode === 'stroke' ? 'precision' : 'standard')
+                    onEraserModeChange(eraserMode === 'standard' ? 'stroke' : eraserMode === 'stroke' ? 'precision' : 'standard')
                   }
                   className="flex items-center space-x-1 bg-slate-100 hover:bg-slate-200 px-3 py-1 rounded-full text-xs font-semibold text-slate-700 transition"
                 >
@@ -616,7 +634,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
                 {/* Switch: Erase highlighter only */}
                 <button
-                  onClick={() => setEraseHighlighterOnly(!eraseHighlighterOnly)}
+                  onClick={() => onEraseHighlighterOnlyChange(!eraseHighlighterOnly)}
                   className={`text-xs px-2.5 py-1 rounded-full font-medium transition ${
                     eraseHighlighterOnly ? 'bg-amber-100 text-amber-800' : 'text-slate-500 hover:bg-slate-100'
                   }`}
@@ -651,7 +669,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               <>
                 {/* Fill Toggle */}
                 <button
-                  onClick={() => setShapeFill(!shapeFill)}
+                  onClick={() => onShapeFillChange(!shapeFill)}
                   className={`p-1.5 rounded-lg text-xs font-medium transition ${
                     shapeFill ? 'bg-blue-100 text-blue-700' : 'text-slate-500 hover:bg-slate-100'
                   }`}
@@ -667,7 +685,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                   {(['rect', 'circle', 'triangle', 'diamond', 'capsule'] as const).map((s) => (
                     <button
                       key={s}
-                      onClick={() => setSelectedShape(s)}
+                      onClick={() => onSelectedShapeChange(s)}
                       className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold transition ${
                         selectedShape === s ? 'bg-blue-50 text-blue-600 border border-blue-300' : 'text-slate-600 hover:bg-slate-100'
                       }`}
@@ -698,8 +716,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 </label>
 
                 <select
-                  value={textSize}
-                  onChange={(e) => setTextSize(Number(e.target.value))}
+                  value={textOptions.fontSize}
+                  onChange={(e) => onTextOptionsChange({ ...textOptions, fontSize: Number(e.target.value) })}
                   className="text-xs bg-slate-100 rounded px-2 py-0.5 border-none outline-none font-medium cursor-pointer"
                 >
                   <option value={16}>16</option>
@@ -710,8 +728,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 </select>
 
                 <select
-                  value={textFamily}
-                  onChange={(e) => setTextFamily(e.target.value)}
+                  value={textOptions.fontFamily}
+                  onChange={(e) => onTextOptionsChange({ ...textOptions, fontFamily: e.target.value })}
                   className="text-xs bg-slate-100 rounded px-2 py-0.5 border-none outline-none font-medium cursor-pointer"
                 >
                   <option value="Moderna">Moderna</option>
@@ -722,14 +740,14 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 </select>
 
                 <button
-                  onClick={() => setIsBold(!isBold)}
-                  className={`w-6 h-6 rounded text-xs font-bold ${isBold ? 'bg-blue-100 text-blue-700' : 'text-slate-600 hover:bg-slate-100'}`}
+                  onClick={() => onTextOptionsChange({ ...textOptions, isBold: !textOptions.isBold })}
+                  className={`w-6 h-6 rounded text-xs font-bold ${textOptions.isBold ? 'bg-blue-100 text-blue-700' : 'text-slate-600 hover:bg-slate-100'}`}
                 >
                   B
                 </button>
                 <button
-                  onClick={() => setIsItalic(!isItalic)}
-                  className={`w-6 h-6 rounded text-xs italic font-serif ${isItalic ? 'bg-blue-100 text-blue-700' : 'text-slate-600 hover:bg-slate-100'}`}
+                  onClick={() => onTextOptionsChange({ ...textOptions, isItalic: !textOptions.isItalic })}
+                  className={`w-6 h-6 rounded text-xs italic font-serif ${textOptions.isItalic ? 'bg-blue-100 text-blue-700' : 'text-slate-600 hover:bg-slate-100'}`}
                 >
                   I
                 </button>
@@ -791,7 +809,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           <div className="grid grid-cols-2 gap-3">
             <button
               onClick={() => {
-                setLaserMode('dot');
+                onLaserModeChange('dot');
                 setActivePopover(null);
               }}
               className={`flex flex-col items-center justify-center p-3 rounded-xl border transition ${
@@ -803,7 +821,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             </button>
             <button
               onClick={() => {
-                setLaserMode('trail');
+                onLaserModeChange('trail');
                 setActivePopover(null);
               }}
               className={`flex flex-col items-center justify-center p-3 rounded-xl border transition ${

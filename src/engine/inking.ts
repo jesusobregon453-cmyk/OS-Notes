@@ -6,6 +6,25 @@ export function distance(p1: Point, p2: Point): number {
   return Math.hypot(dx, dy);
 }
 
+export function colorToRgba(color: string, alpha: number = 0.25): string {
+  if (color.startsWith('#')) {
+    let hex = color.slice(1);
+    if (hex.length === 3) {
+      hex = hex.split('').map((c) => c + c).join('');
+    }
+    if (hex.length >= 6) {
+      const r = parseInt(hex.slice(0, 2), 16);
+      const g = parseInt(hex.slice(2, 4), 16);
+      const b = parseInt(hex.slice(4, 6), 16);
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+  }
+  if (color.startsWith('rgb(')) {
+    return color.replace('rgb(', 'rgba(').replace(')', `, ${alpha})`);
+  }
+  return color;
+}
+
 function catmullRom(p0: number, p1: number, p2: number, p3: number, t: number): number {
   const t2 = t * t;
   const t3 = t2 * t;
@@ -173,6 +192,20 @@ export function renderStroke(
 
   ctx.strokeStyle = stroke.color;
   ctx.fillStyle = stroke.color;
+
+  // Render optional translucent shape background fill (Goodnotes Shapes feature)
+  if (stroke.fillColor && points.length >= 3) {
+    ctx.save();
+    ctx.fillStyle = stroke.fillColor;
+    ctx.beginPath();
+    ctx.moveTo(points[0].x * scale, points[0].y * scale);
+    for (let i = 1; i < points.length; i++) {
+      ctx.lineTo(points[i].x * scale, points[i].y * scale);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
 
   // Single dot
   if (points.length === 1) {

@@ -59,6 +59,17 @@ export interface BoundingBox {
   maxY: number;
 }
 
+export type EraserMode = 'standard' | 'stroke' | 'precision';
+export type LaserMode = 'dot' | 'trail';
+export type ShapeKind = 'auto' | 'rect' | 'circle' | 'triangle' | 'diamond' | 'capsule';
+
+export interface TextOptions {
+  fontSize: number;
+  fontFamily: string;
+  isBold: boolean;
+  isItalic: boolean;
+}
+
 export interface Stroke {
   id: string;
   tool: ToolType;
@@ -68,6 +79,7 @@ export interface Stroke {
   points: Point[];
   bounds: BoundingBox;
   shapeType?: DetectedShapeType;
+  fillColor?: string;
   audioTimestamp?: number;
 }
 
@@ -98,6 +110,9 @@ export interface TextBoxItem {
   height: number;
   text: string;
   fontSize: number;
+  fontFamily?: string;
+  isBold?: boolean;
+  isItalic?: boolean;
   color: string;
   backgroundColor?: string;
 }

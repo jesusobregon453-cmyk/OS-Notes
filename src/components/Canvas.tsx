@@ -1,9 +1,22 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react';
-import type { Page, ToolType, Stroke, Point, ViewportState, BoundingBox, TapeItem, TextBoxItem } from '../types';
+import type {
+  Page,
+  ToolType,
+  Stroke,
+  Point,
+  ViewportState,
+  BoundingBox,
+  TapeItem,
+  TextBoxItem,
+  EraserMode,
+  LaserMode,
+  ShapeKind,
+  TextOptions,
+} from '../types';
 import { drawPageTemplate } from '../engine/templates';
-import { renderStroke, calculateStrokeBounds } from '../engine/inking';
-import { strokeIntersectsEraser } from '../engine/spatial';
-import { detectGeometricShape } from '../engine/shapes';
+import { renderStroke, calculateStrokeBounds, colorToRgba } from '../engine/inking';
+import { strokeIntersectsEraser, pointInBox } from '../engine/spatial';
+import { detectGeometricShape, generateExplicitShape } from '../engine/shapes';
 import { LaserPointerEngine } from '../engine/laser';
 import { selectStrokesWithLasso, renderLassoOverlay } from '../engine/lasso';
 import { renderTape, isPointInTape, calculateTapeBounds } from '../engine/tape';
@@ -20,9 +33,15 @@ interface CanvasProps {
   isAudioRecording: boolean;
   audioElapsed: number;
   isReadOnly?: boolean;
+  eraserMode?: EraserMode;
+  eraseHighlighterOnly?: boolean;
+  shapeFill?: boolean;
+  selectedShape?: ShapeKind;
+  laserMode?: LaserMode;
+  textOptions?: TextOptions;
   onPageUpdate: (updatedPage: Page) => void;
   onViewportChange: (viewport: ViewportState) => void;
-  onAddStickyNoteAt?: (x: number, y: number) => void;
+  onAddStickyNoteAt?: (x: number, y: number, color?: string) => void;
   onSaveSelectionAsElement?: (strokes: Stroke[]) => void;
 }
 
@@ -35,6 +54,12 @@ export const Canvas: React.FC<CanvasProps> = ({
   isAudioRecording,
   audioElapsed,
   isReadOnly = false,
+  eraserMode = 'standard',
+  eraseHighlighterOnly = false,
+  shapeFill = false,
+  selectedShape = 'rect',
+  laserMode = 'trail',
+  textOptions,
   onPageUpdate,
   onViewportChange,
   onAddStickyNoteAt,
@@ -51,9 +76,22 @@ export const Canvas: React.FC<CanvasProps> = ({
   const isPanningRef = useRef(false);
   const panStartRef = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
 
+  // Live Eraser Ref State (for 60fps canvas redraw and single-step undo)
+  const erasedStrokesRef = useRef<Stroke[] | null>(null);
+  const erasedTapesRef = useRef<TapeItem[] | null>(null);
+
+  // Live Lasso Drag Ref State (for interactive moving of selected strokes)
+  const isDraggingLassoRef = useRef(false);
+  const lassoDragStartRef = useRef<{ x: number; y: number } | null>(null);
+  const lassoDragOffsetRef = useRef<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
+
   // Laser Pointer Engine
   const laserEngineRef = useRef<LaserPointerEngine>(new LaserPointerEngine());
   const laserAnimRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    laserEngineRef.current.mode = laserMode;
+  }, [laserMode]);
 
   // Lasso Selection State
   const [selectedStrokeIds, setSelectedStrokeIds] = useState<string[]>([]);
@@ -76,38 +114,44 @@ export const Canvas: React.FC<CanvasProps> = ({
     drawPageTemplate(ctx, page.width, page.height, page.template, page.theme || 'white');
   }, [page.width, page.height, page.template, page.theme, dpr]);
 
-  // Render Static Strokes and Tapes
-  const redrawStaticStrokes = useCallback(() => {
-    const canvas = staticCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+  // Render Static Strokes and Tapes (with optional override for live drag/erase previews)
+  const redrawStaticStrokes = useCallback(
+    (customStrokes?: Stroke[], customTapes?: TapeItem[]) => {
+      const canvas = staticCanvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
 
-    canvas.width = page.width * dpr;
-    canvas.height = page.height * dpr;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.scale(dpr, dpr);
+      canvas.width = page.width * dpr;
+      canvas.height = page.height * dpr;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.scale(dpr, dpr);
 
-    // 1. Render Highlighters
-    const highlighters = page.strokes.filter((s) => s.tool === 'highlighter');
-    const normalStrokes = page.strokes.filter((s) => s.tool !== 'highlighter');
+      const strokesToRender = customStrokes || page.strokes;
+      const tapesToRender = customTapes || page.tapes;
 
-    for (const stroke of highlighters) {
-      renderStroke(ctx, stroke, 1.0);
-    }
+      // 1. Render Highlighters
+      const highlighters = strokesToRender.filter((s) => s.tool === 'highlighter');
+      const normalStrokes = strokesToRender.filter((s) => s.tool !== 'highlighter');
 
-    // 2. Render Normal Handwriting & Drawing Strokes
-    for (const stroke of normalStrokes) {
-      renderStroke(ctx, stroke, 1.0);
-    }
-
-    // 3. Render Study Tapes (above handwriting to conceal answers)
-    if (page.tapes) {
-      for (const tape of page.tapes) {
-        renderTape(ctx, tape, 1.0);
+      for (const stroke of highlighters) {
+        renderStroke(ctx, stroke, 1.0);
       }
-    }
-  }, [page.strokes, page.tapes, page.width, page.height, dpr]);
+
+      // 2. Render Normal Handwriting & Drawing Strokes
+      for (const stroke of normalStrokes) {
+        renderStroke(ctx, stroke, 1.0);
+      }
+
+      // 3. Render Study Tapes (above handwriting to conceal answers)
+      if (tapesToRender) {
+        for (const tape of tapesToRender) {
+          renderTape(ctx, tape, 1.0);
+        }
+      }
+    },
+    [page.strokes, page.tapes, page.width, page.height, dpr]
+  );
 
   useEffect(() => {
     redrawStaticStrokes();
@@ -198,11 +242,11 @@ export const Canvas: React.FC<CanvasProps> = ({
 
     // Sticky Note tool
     if (currentTool === 'sticky') {
-      onAddStickyNoteAt?.(x, y);
+      onAddStickyNoteAt?.(x, y, currentColor);
       return;
     }
 
-    // Text Box tool: spawn a new text box at click position
+    // Text Box tool: spawn a new text box at click position with current typography
     if (currentTool === 'text') {
       const newBox: TextBoxItem = {
         id: `textbox-${Date.now()}`,
@@ -211,8 +255,11 @@ export const Canvas: React.FC<CanvasProps> = ({
         width: 240,
         height: 60,
         text: '',
-        fontSize: 16,
-        color: currentColor === '#f8fafc' ? '#f8fafc' : '#0f172a',
+        fontSize: textOptions?.fontSize || 24,
+        fontFamily: textOptions?.fontFamily || 'Moderna',
+        isBold: textOptions?.isBold ?? false,
+        isItalic: textOptions?.isItalic ?? false,
+        color: currentColor === '#f8fafc' ? '#0f172a' : currentColor,
       };
       const boxes = [...(page.textBoxes || []), newBox];
       onPageUpdate({ ...page, textBoxes: boxes });
@@ -243,15 +290,24 @@ export const Canvas: React.FC<CanvasProps> = ({
     }
 
     if (currentTool === 'eraser') {
+      erasedStrokesRef.current = [...page.strokes];
+      erasedTapesRef.current = page.tapes ? [...page.tapes] : [];
       handleEraser(x, y);
       drawEraserIndicator(x, y);
       return;
     }
 
     if (currentTool === 'lasso') {
-      lassoPolygonRef.current = [{ x, y, pressure, time: Date.now() }];
+      if (selectionBounds && pointInBox(x, y, selectionBounds) && selectedStrokeIds.length > 0) {
+        isDraggingLassoRef.current = true;
+        lassoDragStartRef.current = { x, y };
+        lassoDragOffsetRef.current = { dx: 0, dy: 0 };
+        return;
+      }
       setSelectedStrokeIds([]);
       setSelectionBounds(null);
+      clearOverlay();
+      lassoPolygonRef.current = [{ x, y, pressure, time: Date.now() }];
       drawLasso();
       return;
     }
@@ -309,6 +365,47 @@ export const Canvas: React.FC<CanvasProps> = ({
     }
 
     if (currentTool === 'lasso') {
+      if (isDraggingLassoRef.current && lassoDragStartRef.current && selectionBounds) {
+        const dx = x - lassoDragStartRef.current.x;
+        const dy = y - lassoDragStartRef.current.y;
+        lassoDragOffsetRef.current = { dx, dy };
+
+        // Temporarily hide selected strokes on static canvas
+        const unselected = page.strokes.filter((s) => !selectedStrokeIds.includes(s.id));
+        redrawStaticStrokes(unselected, page.tapes);
+
+        // Render selected strokes offset on active canvas
+        const activeCanvas = activeCanvasRef.current;
+        if (activeCanvas) {
+          const ctx = activeCanvas.getContext('2d');
+          if (ctx) {
+            activeCanvas.width = page.width * dpr;
+            activeCanvas.height = page.height * dpr;
+            ctx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
+            ctx.scale(dpr, dpr);
+            for (const s of page.strokes) {
+              if (selectedStrokeIds.includes(s.id)) {
+                const movedStroke: Stroke = {
+                  ...s,
+                  points: s.points.map((p) => ({ ...p, x: p.x + dx, y: p.y + dy })),
+                };
+                renderStroke(ctx, movedStroke, 1.0);
+              }
+            }
+          }
+        }
+
+        // Draw moved lasso bounds
+        const offsetBounds: BoundingBox = {
+          minX: selectionBounds.minX + dx,
+          minY: selectionBounds.minY + dy,
+          maxX: selectionBounds.maxX + dx,
+          maxY: selectionBounds.maxY + dy,
+        };
+        drawLasso({ selectedStrokeIds, bounds: offsetBounds });
+        return;
+      }
+
       lassoPolygonRef.current.push({ x, y, pressure: 0.5, time: Date.now() });
       drawLasso();
       return;
@@ -353,6 +450,23 @@ export const Canvas: React.FC<CanvasProps> = ({
         bounds: { minX: 0, minY: 0, maxX: 0, maxY: 0 },
       };
       renderTape(ctx, tempTape, 1.0);
+    } else if (currentTool === 'shape' && selectedShape !== 'auto' && activePointsRef.current.length > 0) {
+      // Live rendering of selected geometric shape during drag
+      const pStart = activePointsRef.current[0];
+      const pCurr = activePointsRef.current[activePointsRef.current.length - 1];
+      const shapePoints = generateExplicitShape(selectedShape, pStart, pCurr);
+      const tempStroke: Stroke = {
+        id: 'active-shape',
+        tool: 'shape',
+        color: currentColor,
+        baseWidth: currentWidth,
+        opacity: 1.0,
+        points: shapePoints,
+        bounds: { minX: 0, minY: 0, maxX: 0, maxY: 0 },
+        shapeType: selectedShape as any,
+        fillColor: shapeFill ? colorToRgba(currentColor, 0.22) : undefined,
+      };
+      renderStroke(ctx, tempStroke, 1.0);
     } else {
       const tempStroke: Stroke = {
         id: 'active',
@@ -386,8 +500,52 @@ export const Canvas: React.FC<CanvasProps> = ({
 
     if (currentTool === 'laser') return;
 
+    if (isDraggingLassoRef.current) {
+      isDraggingLassoRef.current = false;
+      const { dx, dy } = lassoDragOffsetRef.current;
+      if ((dx !== 0 || dy !== 0) && selectionBounds) {
+        const updatedStrokes = page.strokes.map((s) => {
+          if (selectedStrokeIds.includes(s.id)) {
+            const newPoints = s.points.map((p) => ({ ...p, x: p.x + dx, y: p.y + dy }));
+            return {
+              ...s,
+              points: newPoints,
+              bounds: calculateStrokeBounds(newPoints, s.baseWidth),
+            };
+          }
+          return s;
+        });
+
+        const newBounds: BoundingBox = {
+          minX: selectionBounds.minX + dx,
+          minY: selectionBounds.minY + dy,
+          maxX: selectionBounds.maxX + dx,
+          maxY: selectionBounds.maxY + dy,
+        };
+        setSelectionBounds(newBounds);
+        onPageUpdate({ ...page, strokes: updatedStrokes });
+        drawLasso({ selectedStrokeIds, bounds: newBounds });
+      } else {
+        redrawStaticStrokes();
+      }
+
+      const activeCanvas = activeCanvasRef.current;
+      if (activeCanvas) {
+        const ctx = activeCanvas.getContext('2d');
+        if (ctx) ctx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
+      }
+      return;
+    }
+
     if (currentTool === 'eraser') {
       clearOverlay();
+      if (erasedStrokesRef.current) {
+        const finalStrokes = erasedStrokesRef.current;
+        const finalTapes = erasedTapesRef.current || page.tapes || [];
+        erasedStrokesRef.current = null;
+        erasedTapesRef.current = null;
+        onPageUpdate({ ...page, strokes: finalStrokes, tapes: finalTapes });
+      }
       return;
     }
 
@@ -429,14 +587,21 @@ export const Canvas: React.FC<CanvasProps> = ({
       return;
     }
 
-    // Geometric Shape Recognition: only if the Shape tool is selected
+    // Geometric Shape Recognition & Generation
     let finalPoints = points;
     let shapeType = undefined;
     if (currentTool === 'shape') {
-      const detected = detectGeometricShape(points);
-      if (detected.type !== 'none') {
-        finalPoints = detected.perfectPoints;
-        shapeType = detected.type;
+      if (selectedShape !== 'auto' && points.length > 1) {
+        const pStart = points[0];
+        const pEnd = points[points.length - 1];
+        finalPoints = generateExplicitShape(selectedShape, pStart, pEnd);
+        shapeType = selectedShape as any;
+      } else {
+        const detected = detectGeometricShape(points);
+        if (detected.type !== 'none') {
+          finalPoints = detected.perfectPoints;
+          shapeType = detected.type;
+        }
       }
     }
 
@@ -450,6 +615,9 @@ export const Canvas: React.FC<CanvasProps> = ({
       points: [...finalPoints],
       bounds,
       shapeType,
+      fillColor: shapeFill && shapeType && shapeType !== 'line' && shapeType !== 'none'
+        ? colorToRgba(currentColor, 0.22)
+        : undefined,
       audioTimestamp: isAudioRecording ? audioElapsed : undefined,
     };
 
@@ -468,19 +636,82 @@ export const Canvas: React.FC<CanvasProps> = ({
   };
 
   const handleEraser = (x: number, y: number) => {
-    const eraserRadius = currentWidth * 1.5;
-    const remainingStrokes = page.strokes.filter((s) => !strokeIntersectsEraser(s, x, y, eraserRadius));
-    const remainingTapes = (page.tapes || []).filter((t) => !isPointInTape(x, y, t));
+    const strokes = erasedStrokesRef.current || page.strokes;
+    const tapes = erasedTapesRef.current || page.tapes || [];
 
-    if (
-      remainingStrokes.length !== page.strokes.length ||
-      remainingTapes.length !== (page.tapes || []).length
-    ) {
-      onPageUpdate({
-        ...page,
-        strokes: remainingStrokes,
-        tapes: remainingTapes,
-      });
+    const eraserRadius =
+      eraserMode === 'precision'
+        ? Math.max(4, currentWidth * 0.6)
+        : eraserMode === 'stroke'
+        ? Math.max(12, currentWidth * 1.5)
+        : Math.max(8, currentWidth * 1.2);
+
+    let changed = false;
+    const nextStrokes: Stroke[] = [];
+
+    for (const s of strokes) {
+      // Solo resaltar: Si está activo, solo borramos resaltador; preservamos todo lo demás
+      if (eraseHighlighterOnly && s.tool !== 'highlighter') {
+        nextStrokes.push(s);
+        continue;
+      }
+
+      if (!strokeIntersectsEraser(s, x, y, eraserRadius)) {
+        nextStrokes.push(s);
+        continue;
+      }
+
+      changed = true;
+
+      // In 'stroke' mode or if it's a closed geometric shape, remove the whole stroke
+      if (eraserMode === 'stroke' || s.shapeType) {
+        continue;
+      }
+
+      // In 'precision' or 'standard' mode: split the stroke by removing points in radius!
+      const radiusSq = Math.pow(eraserRadius + s.baseWidth * 0.4, 2);
+      const segments: Point[][] = [];
+      let currentSegment: Point[] = [];
+
+      for (let i = 0; i < s.points.length; i++) {
+        const p = s.points[i];
+        const distSq = (p.x - x) * (p.x - x) + (p.y - y) * (p.y - y);
+        if (distSq > radiusSq) {
+          currentSegment.push(p);
+        } else {
+          if (currentSegment.length > 1) {
+            segments.push(currentSegment);
+          }
+          currentSegment = [];
+        }
+      }
+      if (currentSegment.length > 1) {
+        segments.push(currentSegment);
+      }
+
+      for (let segIdx = 0; segIdx < segments.length; segIdx++) {
+        const segPoints = segments[segIdx];
+        nextStrokes.push({
+          ...s,
+          id: `${s.id}-part-${segIdx}-${Date.now()}`,
+          points: segPoints,
+          bounds: calculateStrokeBounds(segPoints, s.baseWidth),
+        });
+      }
+    }
+
+    const remainingTapes = eraseHighlighterOnly
+      ? tapes
+      : tapes.filter((t) => !isPointInTape(x, y, t));
+
+    if (remainingTapes.length !== tapes.length) {
+      changed = true;
+    }
+
+    if (changed) {
+      erasedStrokesRef.current = nextStrokes;
+      erasedTapesRef.current = remainingTapes;
+      redrawStaticStrokes(nextStrokes, remainingTapes);
     }
   };
 
@@ -495,9 +726,15 @@ export const Canvas: React.FC<CanvasProps> = ({
     ctx.clearRect(0, 0, overlay.width, overlay.height);
     ctx.scale(dpr, dpr);
 
-    const eraserRadius = currentWidth * 1.5;
-    ctx.strokeStyle = '#475569';
-    ctx.fillStyle = 'rgba(226, 232, 240, 0.4)';
+    const eraserRadius =
+      eraserMode === 'precision'
+        ? Math.max(5, currentWidth * 0.7)
+        : eraserMode === 'stroke'
+        ? Math.max(12, currentWidth * 1.5)
+        : Math.max(8, currentWidth * 1.2);
+
+    ctx.strokeStyle = eraseHighlighterOnly ? '#f59e0b' : '#475569';
+    ctx.fillStyle = eraseHighlighterOnly ? 'rgba(254, 240, 138, 0.4)' : 'rgba(226, 232, 240, 0.4)';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.arc(x, y, eraserRadius, 0, Math.PI * 2);

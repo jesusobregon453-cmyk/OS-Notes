@@ -154,3 +154,83 @@ export function detectGeometricShape(points: Point[]): {
 
   return { type: 'none', perfectPoints: points };
 }
+
+/**
+ * Generates exact geometric shapes from drag bounds
+ */
+export function generateExplicitShape(
+  kind: 'rect' | 'circle' | 'triangle' | 'diamond' | 'capsule',
+  p1: Point,
+  p2: Point
+): Point[] {
+  const minX = Math.min(p1.x, p2.x);
+  const maxX = Math.max(p1.x, p2.x);
+  const minY = Math.min(p1.y, p2.y);
+  const maxY = Math.max(p1.y, p2.y);
+  const width = Math.max(10, maxX - minX);
+  const height = Math.max(10, maxY - minY);
+  const centerX = minX + width / 2;
+  const centerY = minY + height / 2;
+  const now = Date.now();
+
+  if (kind === 'rect') {
+    return [
+      { x: minX, y: minY, pressure: 0.5, time: now },
+      { x: maxX, y: minY, pressure: 0.5, time: now },
+      { x: maxX, y: maxY, pressure: 0.5, time: now },
+      { x: minX, y: maxY, pressure: 0.5, time: now },
+      { x: minX, y: minY, pressure: 0.5, time: now },
+    ];
+  }
+
+  if (kind === 'circle') {
+    const rx = width / 2;
+    const ry = height / 2;
+    const points: Point[] = [];
+    for (let i = 0; i <= 36; i++) {
+      const angle = (i / 36) * Math.PI * 2;
+      points.push({
+        x: centerX + rx * Math.cos(angle),
+        y: centerY + ry * Math.sin(angle),
+        pressure: 0.5,
+        time: now,
+      });
+    }
+    return points;
+  }
+
+  if (kind === 'triangle') {
+    return [
+      { x: centerX, y: minY, pressure: 0.5, time: now },
+      { x: maxX, y: maxY, pressure: 0.5, time: now },
+      { x: minX, y: maxY, pressure: 0.5, time: now },
+      { x: centerX, y: minY, pressure: 0.5, time: now },
+    ];
+  }
+
+  if (kind === 'diamond') {
+    return [
+      { x: centerX, y: minY, pressure: 0.5, time: now },
+      { x: maxX, y: centerY, pressure: 0.5, time: now },
+      { x: centerX, y: maxY, pressure: 0.5, time: now },
+      { x: minX, y: centerY, pressure: 0.5, time: now },
+      { x: centerX, y: minY, pressure: 0.5, time: now },
+    ];
+  }
+
+  if (kind === 'capsule') {
+    const points: Point[] = [];
+    for (let i = 0; i <= 36; i++) {
+      const angle = (i / 36) * Math.PI * 2;
+      points.push({
+        x: centerX + (width / 2) * Math.cos(angle),
+        y: centerY + (height / 2) * Math.sin(angle),
+        pressure: 0.5,
+        time: now,
+      });
+    }
+    return points;
+  }
+
+  return [p1, p2];
+}

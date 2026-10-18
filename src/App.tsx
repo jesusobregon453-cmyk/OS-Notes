@@ -11,6 +11,10 @@ import type {
   NotebookCover,
   NotebookSummary,
   SavedElement,
+  EraserMode,
+  LaserMode,
+  ShapeKind,
+  TextOptions,
 } from './types';
 import {
   createDefaultNotebook,
@@ -51,6 +55,19 @@ export const App: React.FC = () => {
   const [isPagesSidebarOpen, setIsPagesSidebarOpen] = useState<boolean>(false);
   const [isElementsModalOpen, setIsElementsModalOpen] = useState<boolean>(false);
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving'>('saved');
+
+  // Subcontrols States
+  const [eraserMode, setEraserMode] = useState<EraserMode>('standard');
+  const [eraseHighlighterOnly, setEraseHighlighterOnly] = useState<boolean>(false);
+  const [shapeFill, setShapeFill] = useState<boolean>(false);
+  const [selectedShape, setSelectedShape] = useState<ShapeKind>('rect');
+  const [laserMode, setLaserMode] = useState<LaserMode>('trail');
+  const [textOptions, setTextOptions] = useState<TextOptions>({
+    fontSize: 24,
+    fontFamily: 'Moderna',
+    isBold: false,
+    isItalic: false,
+  });
 
   // User Saved Elements / Stickers
   const [savedElements, setSavedElements] = useState<SavedElement[]>(() => {
@@ -461,7 +478,7 @@ export const App: React.FC = () => {
     });
   };
 
-  const handleAddStickyNoteAt = (x: number, y: number) => {
+  const handleAddStickyNoteAt = (x: number, y: number, color?: string) => {
     if (!currentPage) return;
     const newNote = {
       id: `sticky-${Date.now()}`,
@@ -470,7 +487,7 @@ export const App: React.FC = () => {
       width: 200,
       height: 120,
       text: '',
-      color: '#fef08a',
+      color: color || currentColor || '#fef08a',
     };
     const notes = [...(currentPage.stickyNotes || []), newNote];
     handlePageUpdate({ ...currentPage, stickyNotes: notes });
@@ -632,6 +649,18 @@ export const App: React.FC = () => {
             onDuplicatePage={() => handleDuplicatePage(currentPageIndex)}
             onImageInsert={handleImageInsert}
             saveStatus={saveStatus}
+            eraserMode={eraserMode}
+            onEraserModeChange={setEraserMode}
+            eraseHighlighterOnly={eraseHighlighterOnly}
+            onEraseHighlighterOnlyChange={setEraseHighlighterOnly}
+            shapeFill={shapeFill}
+            onShapeFillChange={setShapeFill}
+            selectedShape={selectedShape}
+            onSelectedShapeChange={setSelectedShape}
+            laserMode={laserMode}
+            onLaserModeChange={setLaserMode}
+            textOptions={textOptions}
+            onTextOptionsChange={setTextOptions}
           />
 
           {/* Main Area: Optional Left Pages Sidebar + Canvas */}
@@ -661,6 +690,12 @@ export const App: React.FC = () => {
                 isAudioRecording={audioState.isRecording}
                 audioElapsed={audioState.duration}
                 isReadOnly={isReadOnly}
+                eraserMode={eraserMode}
+                eraseHighlighterOnly={eraseHighlighterOnly}
+                shapeFill={shapeFill}
+                selectedShape={selectedShape}
+                laserMode={laserMode}
+                textOptions={textOptions}
                 onPageUpdate={handlePageUpdate}
                 onViewportChange={setViewport}
                 onAddStickyNoteAt={handleAddStickyNoteAt}
