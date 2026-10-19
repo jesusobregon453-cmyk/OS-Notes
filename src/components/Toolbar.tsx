@@ -29,6 +29,7 @@ import {
   CircleDot,
   Search,
   CheckCircle2,
+  Cloud,
 } from 'lucide-react';
 import type {
   ToolType,
@@ -40,6 +41,7 @@ import type {
   LaserMode,
   ShapeKind,
   TextOptions,
+  CloudSyncStatus,
 } from '../types';
 
 interface ToolbarProps {
@@ -53,6 +55,9 @@ interface ToolbarProps {
   onToggleBookmark: () => void;
   isReadOnly: boolean;
   onToggleReadOnly: () => void;
+  isCloudSynced?: boolean;
+  cloudSyncStatus?: CloudSyncStatus;
+  onOpenSyncModal?: () => void;
   currentTool: ToolType;
   onSelectTool: (tool: ToolType) => void;
   currentColor: string;
@@ -124,6 +129,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onToggleBookmark,
   isReadOnly,
   onToggleReadOnly,
+  isCloudSynced,
+  cloudSyncStatus,
+  onOpenSyncModal,
   currentTool,
   onSelectTool,
   currentColor,
@@ -250,6 +258,28 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             <span title={saveStatus === 'saved' ? 'Guardado en IndexedDB' : 'Guardando cambios...'}>
               <CheckCircle2 className={`w-3 h-3 ${saveStatus === 'saved' ? 'text-emerald-300' : 'text-amber-300 animate-pulse'}`} />
             </span>
+            {/* Cloud Sync indicator */}
+            <button
+              onClick={onOpenSyncModal}
+              className="hover:opacity-80 transition flex items-center p-0.5 rounded"
+              title={
+                cloudSyncStatus === 'syncing'
+                  ? 'Sincronizando con Google Drive...'
+                  : isCloudSynced
+                  ? 'Sincronizado con Google Drive (Clic para ver)'
+                  : 'Sincronizar este cuaderno con Google Drive'
+              }
+            >
+              <Cloud
+                className={`w-3 h-3 ${
+                  cloudSyncStatus === 'syncing'
+                    ? 'text-amber-300 animate-spin'
+                    : isCloudSynced
+                    ? 'text-sky-300 fill-sky-300/40'
+                    : 'text-white/40 hover:text-white'
+                }`}
+              />
+            </button>
             <button
               onClick={onBackToLibrary}
               className="p-0.5 rounded-full hover:bg-blue-600 text-blue-200 hover:text-white transition"
@@ -484,6 +514,27 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             title="Exportar archivo (.osnotes)"
           >
             <Share2 className="w-4 h-4" />
+          </button>
+
+          {/* Google Drive Cloud Button */}
+          <button
+            onClick={onOpenSyncModal}
+            className={`p-1.5 rounded-lg transition ${
+              cloudSyncStatus === 'syncing'
+                ? 'text-amber-300 animate-pulse bg-white/10'
+                : isCloudSynced
+                ? 'text-sky-300 hover:text-white hover:bg-white/10'
+                : 'text-white/80 hover:text-white hover:bg-white/10'
+            }`}
+            title={
+              cloudSyncStatus === 'syncing'
+                ? 'Sincronizando con Google Drive...'
+                : isCloudSynced
+                ? 'Sincronizado con Google Drive (Abrir configuración)'
+                : 'Conectar y sincronizar con Google Drive'
+            }
+          >
+            <Cloud className="w-4 h-4" />
           </button>
 
           {/* More Menu (...) */}
@@ -974,6 +1025,17 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             >
               <span className="w-4 h-4 flex items-center justify-center font-bold text-slate-500">👁</span>
               <span>{isReadOnly ? 'Desactivar Modo Lectura' : 'Modo Lectura (Bloquear trazos)'}</span>
+            </button>
+
+            <button
+              onClick={() => {
+                if (onOpenSyncModal) onOpenSyncModal();
+                setActivePopover(null);
+              }}
+              className="w-full flex items-center space-x-3 px-4 py-2 hover:bg-slate-50 text-left text-blue-600 font-medium"
+            >
+              <Cloud className="w-4 h-4" />
+              <span>Sincronizar con Google Drive</span>
             </button>
           </div>
 

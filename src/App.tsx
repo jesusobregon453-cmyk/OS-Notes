@@ -15,6 +15,7 @@ import type {
   LaserMode,
   ShapeKind,
   TextOptions,
+  CloudSyncState,
 } from './types';
 import {
   createDefaultNotebook,
@@ -30,6 +31,11 @@ import {
   duplicateNotebookInDB,
   toggleNotebookFavoriteInDB,
 } from './engine/storage';
+import {
+  getStoredGoogleUser,
+  syncAllWithGoogleDrive,
+  uploadNotebookToGoogleDrive,
+} from './engine/googleDrive';
 import { drawPageTemplate } from './engine/templates';
 import { renderStroke } from './engine/inking';
 import { AudioSyncEngine } from './engine/audio';
@@ -38,6 +44,7 @@ import { Canvas } from './components/Canvas';
 import { LibraryView } from './components/LibraryView';
 import { PagesSidebar } from './components/PagesSidebar';
 import { ElementsModal } from './components/ElementsModal';
+import { GoogleSyncModal } from './components/GoogleSyncModal';
 
 const USER_ELEMENTS_STORAGE_KEY = 'osnotes_user_saved_elements';
 
@@ -54,7 +61,20 @@ export const App: React.FC = () => {
   const [isReadOnly, setIsReadOnly] = useState<boolean>(false);
   const [isPagesSidebarOpen, setIsPagesSidebarOpen] = useState<boolean>(false);
   const [isElementsModalOpen, setIsElementsModalOpen] = useState<boolean>(false);
+  const [isGoogleModalOpen, setIsGoogleModalOpen] = useState<boolean>(false);
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving'>('saved');
+
+  // Cloud Sync State
+  const [syncState, setSyncState] = useState<CloudSyncState>(() => {
+    const user = getStoredGoogleUser();
+    return {
+      user,
+      status: user ? 'idle' : 'offline',
+      lastSyncTime: null,
+      errorMessage: null,
+      syncedNotebookCount: 0,
+    };
+  });
 
   // Subcontrols States
   const [eraserMode, setEraserMode] = useState<EraserMode>('standard');
@@ -131,9 +151,64 @@ export const App: React.FC = () => {
     refreshLibrary();
   }, [refreshLibrary]);
 
+  // Handle Google Drive Sync Now
+  const handleSyncNow = useCallback(async () => {
+    if (!syncState.user) {
+      setIsGoogleModalOpen(true);
+      return;
+    }
+    setSyncState((prev) => ({ ...prev, status: 'syncing', errorMessage: null }));
+    try {
+      const result = await syncAllWithGoogleDrive(syncState.user);
+      setSyncState((prev) => ({
+        ...prev,
+        status: 'synced',
+        lastSyncTime: Date.now(),
+        syncedNotebookCount: result.totalSynced,
+        errorMessage: null,
+      }));
+      await refreshLibrary();
+      if (doc) {
+        const reloaded = await loadNotebookById(doc.id);
+        if (reloaded) setDoc(reloaded);
+      }
+    } catch (err) {
+      setSyncState((prev) => ({
+        ...prev,
+        status: 'error',
+        errorMessage: (err as Error).message,
+      }));
+    }
+  }, [syncState.user, refreshLibrary, doc]);
+
+  // Initial background sync with Google Drive on boot if user is logged in
+  const hasInitialSyncedRef = useRef(false);
+  useEffect(() => {
+    if (syncState.user && !hasInitialSyncedRef.current) {
+      hasInitialSyncedRef.current = true;
+      (async () => {
+        try {
+          setSyncState((prev) => ({ ...prev, status: 'syncing' }));
+          const res = await syncAllWithGoogleDrive(syncState.user!);
+          setSyncState((prev) => ({
+            ...prev,
+            status: 'synced',
+            lastSyncTime: Date.now(),
+            syncedNotebookCount: res.totalSynced,
+            errorMessage: null,
+          }));
+          await refreshLibrary();
+        } catch (e) {
+          console.error('Initial background sync error:', e);
+          setSyncState((prev) => ({ ...prev, status: 'error', errorMessage: (e as Error).message }));
+        }
+      })();
+    }
+  }, [syncState.user, refreshLibrary]);
+
   const currentPage = doc && doc.pages ? doc.pages[currentPageIndex] || doc.pages[0] : null;
 
-  // Auto-save notebook changes ONLY when editing an active document
+  // Auto-save notebook changes ONLY when editing an active document + Cloud Auto-sync
   const saveTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -150,6 +225,30 @@ export const App: React.FC = () => {
         setSaveStatus('saved');
         const summaries = await getAllNotebookSummaries();
         setNotebookSummaries(summaries);
+
+        // Auto-upload to Google Drive if logged in
+        if (syncState.user) {
+          try {
+            setSyncState((prev) => ({ ...prev, status: 'syncing' }));
+            const cloudFileId = await uploadNotebookToGoogleDrive(syncState.user, doc);
+            if (!doc.isCloudSynced || doc.cloudFileId !== cloudFileId) {
+              const updatedDoc: NotebookDocument = { ...doc, isCloudSynced: true, cloudFileId };
+              await saveNotebookToDB(updatedDoc);
+              setDoc((prev) => (prev && prev.id === updatedDoc.id ? updatedDoc : prev));
+              const updatedSummaries = await getAllNotebookSummaries();
+              setNotebookSummaries(updatedSummaries);
+            }
+            setSyncState((prev) => ({
+              ...prev,
+              status: 'synced',
+              lastSyncTime: Date.now(),
+              errorMessage: null,
+            }));
+          } catch (cloudErr) {
+            console.error('Cloud auto-upload error:', cloudErr);
+            setSyncState((prev) => ({ ...prev, status: 'error', errorMessage: (cloudErr as Error).message }));
+          }
+        }
       } catch (err) {
         console.error('Failed to auto-save notebook to IndexedDB:', err);
       }
@@ -158,7 +257,7 @@ export const App: React.FC = () => {
     return () => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     };
-  }, [doc, viewMode]);
+  }, [doc, viewMode, syncState.user]);
 
   // Handle ink color default on theme change
   useEffect(() => {
@@ -602,6 +701,9 @@ export const App: React.FC = () => {
           onExportNotebook={handleExportNotebookById}
           onImportNotebook={handleImport}
           onToggleFavorite={handleToggleFavoriteNotebook}
+          syncState={syncState}
+          onOpenSyncModal={() => setIsGoogleModalOpen(true)}
+          onSyncNow={handleSyncNow}
         />
       ) : (
         <>
@@ -617,6 +719,9 @@ export const App: React.FC = () => {
             onToggleBookmark={handleToggleBookmark}
             isReadOnly={isReadOnly}
             onToggleReadOnly={() => setIsReadOnly((prev) => !prev)}
+            isCloudSynced={!!doc.isCloudSynced}
+            cloudSyncStatus={syncState.status}
+            onOpenSyncModal={() => setIsGoogleModalOpen(true)}
             currentTool={currentTool}
             onSelectTool={setCurrentTool}
             currentColor={currentColor}
@@ -713,6 +818,15 @@ export const App: React.FC = () => {
           />
         </>
       )}
+
+      {/* Google Cloud Sync Modal */}
+      <GoogleSyncModal
+        isOpen={isGoogleModalOpen}
+        onClose={() => setIsGoogleModalOpen(false)}
+        syncState={syncState}
+        onSyncStateChange={setSyncState}
+        onRefreshLibrary={refreshLibrary}
+      />
     </div>
   );
 };

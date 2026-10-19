@@ -165,6 +165,7 @@ export interface NotebookSummary {
   createdAt: number;
   updatedAt: number;
   isFavorite?: boolean;
+  isCloudSynced?: boolean;
 }
 
 export interface NotebookDocument {
@@ -175,6 +176,8 @@ export interface NotebookDocument {
   createdAt: number;
   updatedAt: number;
   isFavorite?: boolean;
+  isCloudSynced?: boolean;
+  cloudFileId?: string;
   pages: Page[];
 }
 
@@ -192,4 +195,24 @@ export interface AudioRecordingState {
   audioBlob?: Blob;
   audioUrl?: string;
   recordingStartTime?: number;
+}
+
+export interface GoogleUser {
+  id: string;
+  name: string;
+  email: string;
+  picture: string;
+  accessToken?: string;
+  expiresAt?: number;
+  isDemo?: boolean;
+}
+
+export type CloudSyncStatus = 'offline' | 'idle' | 'syncing' | 'synced' | 'error';
+
+export interface CloudSyncState {
+  user: GoogleUser | null;
+  status: CloudSyncStatus;
+  lastSyncTime: number | null;
+  errorMessage: string | null;
+  syncedNotebookCount: number;
 }
