@@ -227,7 +227,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
   return (
     <div className="relative z-30 select-none font-sans">
-      {/* 1. Goodnotes Solid Royal Blue Top Bar */}
+      {/* 1. Solid Royal Blue Top Bar */}
       <header className="h-12 bg-[#2563eb] text-white flex items-center justify-between px-3 shadow-md border-b border-blue-700/50">
         {/* Left Section: macOS Traffic Lights + Document Tab + Search + Sidebar + Undo/Redo */}
         <div className="flex items-center space-x-2">
@@ -322,7 +322,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           </button>
         </div>
 
-        {/* Center Section: Main Tool Selector (Goodnotes Icons) */}
+        {/* Center Section: Main Tool Selector */}
         <div className="flex items-center space-x-1">
           {/* 1. Lasso Tool */}
           <button
@@ -497,7 +497,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </div>
       </header>
 
-      {/* 2. Floating Sub-Toolbar (Goodnotes White Rounded Pill) */}
+      {/* 2. Floating Sub-Toolbar (White Rounded Pill) */}
       {!isReadOnly && (
         <div className="absolute top-14 left-1/2 transform -translate-x-1/2 z-20 pointer-events-auto">
           <div className="bg-white text-slate-800 shadow-md border border-slate-200/90 rounded-full px-3 py-1 flex items-center space-x-3 transition-all animate-in fade-in zoom-in-95">
@@ -675,7 +675,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                       ? 'bg-blue-600 text-white shadow-xs'
                       : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                   }`}
-                  title="Dibuja a mano alzada y Goodnotes lo convertirá automáticamente en figura perfecta"
+                  title="Dibuja a mano alzada y OS Notes lo convertirá automáticamente en figura perfecta"
                 >
                   <Sparkles className="w-3.5 h-3.5" />
                   <span>Auto</span>
@@ -825,7 +825,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </div>
       )}
 
-      {/* 3. POPOVER: IMAGES (Goodnotes Screenshot 8) */}
+      {/* 3. POPOVER: IMAGES */}
       {activePopover === 'images' && (
         <div className="popover-container absolute top-14 left-1/2 transform -translate-x-1/2 z-40 bg-white border border-slate-200 rounded-2xl shadow-2xl p-5 w-72 animate-in zoom-in-95">
           <div className="flex items-center justify-between mb-4">
@@ -854,7 +854,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </div>
       )}
 
-      {/* 4. POPOVER: LASER POINTER (Goodnotes Screenshot 11) */}
+      {/* 4. POPOVER: LASER POINTER */}
       {activePopover === 'laser' && (
         <div className="popover-container absolute top-14 left-1/2 transform -translate-x-1/2 z-40 bg-white border border-slate-200 rounded-2xl shadow-2xl p-4 w-64 animate-in zoom-in-95">
           <h4 className="font-bold text-xs text-slate-800 mb-3 text-center">Puntero láser</h4>
@@ -887,7 +887,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </div>
       )}
 
-      {/* 5. POPOVER: ACCESSORIES (Goodnotes Screenshot 12) */}
+      {/* 5. POPOVER: ACCESSORIES */}
       {activePopover === 'accessories' && (
         <div className="popover-container absolute top-14 left-1/2 transform -translate-x-1/2 z-40 bg-white border border-slate-200 rounded-2xl shadow-2xl py-2 w-64 text-xs text-slate-700 animate-in zoom-in-95">
           <div className="px-4 py-1.5 font-bold text-slate-900 border-b border-slate-100">Accesorios</div>
@@ -917,7 +917,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </div>
       )}
 
-      {/* 6. POPOVER: MORE MENU (...) (Goodnotes Screenshot 13) */}
+      {/* 6. POPOVER: MORE MENU (...) */}
       {activePopover === 'moreMenu' && (
         <div className="popover-container absolute top-14 right-4 z-40 bg-white border border-slate-200 rounded-2xl shadow-2xl py-2 w-72 text-xs text-slate-700 animate-in zoom-in-95 max-h-[85vh] overflow-y-auto">
           {/* Header with thumbnail */}

@@ -227,7 +227,7 @@ export const App: React.FC = () => {
     });
   }, [currentPage, currentPageIndex, doc]);
 
-  // Keyboard Shortcuts (matching Goodnotes: W=Pen, E=Eraser, V=Lasso, S=Shapes, T=Text, M=Elements, N=Note)
+  // Keyboard Shortcuts (W=Pen, E=Eraser, V=Lasso, S=Shapes, T=Text, M=Elements, N=Note)
   useEffect(() => {
     if (viewMode !== 'editor') return;
 
@@ -665,7 +665,7 @@ export const App: React.FC = () => {
 
           {/* Main Area: Optional Left Pages Sidebar + Canvas */}
           <main className="flex-1 relative flex overflow-hidden bg-[#e2e8f0]/40">
-            {/* Goodnotes Left Pages Sidebar Drawer */}
+            {/* Left Pages Sidebar Drawer */}
             <PagesSidebar
               pages={doc.pages}
               currentPageIndex={currentPageIndex}

@@ -137,7 +137,7 @@ export const PagesSidebar: React.FC<PagesSidebarProps> = ({
 
       {/* Scrollable Content */}
       <div className="flex-1 overflow-y-auto p-3">
-        {/* TAB 1: THUMBNAILS GRID (Goodnotes Screenshot 2) */}
+        {/* TAB 1: THUMBNAILS GRID */}
         {tab === 'thumbnails' && (
           <div className="grid grid-cols-2 gap-3">
             {pages.map((p, idx) => (

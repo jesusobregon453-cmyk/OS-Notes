@@ -124,7 +124,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
 
   return (
     <div className="flex w-full h-full bg-[#f8fafc] text-slate-800 overflow-hidden select-none font-sans">
-      {/* Goodnotes Clean Left Navigation Sidebar */}
+      {/* Clean Left Navigation Sidebar */}
       <aside className="w-56 bg-[#f1f5f9] border-r border-slate-200/90 flex flex-col justify-between py-3 px-3">
         <div>
           {/* macOS traffic light window controls */}
@@ -136,10 +136,11 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
 
           {/* App Logo */}
           <div className="px-3 mb-6">
-            <h1 className="text-xl font-bold tracking-tight text-slate-900 flex items-center space-x-1.5">
-              <span>Goodnotes</span>
-              <span className="text-[10px] font-semibold text-blue-600 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded">
-                OS
+            <h1 className="text-xl font-extrabold tracking-tight text-slate-900 flex items-center space-x-1.5">
+              <span className="text-blue-600 font-black">OS</span>
+              <span>Notes</span>
+              <span className="text-[10px] font-bold text-blue-600 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded tracking-wider uppercase">
+                Pro
               </span>
             </h1>
           </div>
@@ -271,7 +272,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
               </button>
             </div>
 
-            {/* Primary "+ Nuevo" Goodnotes Blue Button */}
+            {/* Primary "+ Nuevo" Blue Button */}
             <button
               onClick={() => setIsCreateModalOpen(true)}
               className="flex items-center space-x-1.5 px-4 py-1.5 bg-[#2563eb] hover:bg-[#1d4ed8] text-white rounded-lg text-xs font-semibold shadow-xs transition"
@@ -312,7 +313,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                   onClick={() => onOpenNotebook(nb.id)}
                   className="group relative flex flex-col cursor-pointer select-none"
                 >
-                  {/* Goodnotes Style Notebook Thumbnail Card */}
+                  {/* Notebook Thumbnail Card */}
                   <div className="relative aspect-[3/4] rounded-lg shadow-sm border border-slate-200 group-hover:border-blue-400 group-hover:shadow-md transition-all duration-150 overflow-hidden bg-[#faf8f5]">
                     {/* Simulated Graph / Paper Grid lines */}
                     <div
@@ -443,7 +444,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
             </div>
           )}
 
-          {/* Bottom Floating Toast Banner (Exact copy from Goodnotes Screenshot 1) */}
+          {/* Bottom Floating Toast Banner */}
           {showBottomBanner && (
             <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-40 bg-white border border-slate-200 shadow-xl rounded-2xl px-5 py-3 max-w-lg w-full flex items-center justify-between space-x-4 animate-in slide-in-from-bottom-4">
               <div className="flex items-start space-x-3">
@@ -451,7 +452,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                 <div>
                   <h5 className="text-xs font-bold text-slate-900">Accede al último documento abierto</h5>
                   <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
-                    Después de reiniciar Goodnotes, puedes volver rápidamente al último documento desde la biblioteca o abrir cualquiera con un solo clic.
+                    Después de reiniciar OS Notes, puedes volver rápidamente al último documento desde la biblioteca o abrir cualquiera con un solo clic.
                   </p>
                 </div>
               </div>
