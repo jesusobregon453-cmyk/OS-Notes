@@ -7,6 +7,7 @@ import {
 
 const GOOGLE_USER_STORAGE_KEY = 'osnotes_google_user';
 const GOOGLE_CLIENT_ID_KEY = 'osnotes_google_client_id';
+const GOOGLE_CLIENT_SECRET_KEY = 'osnotes_google_client_secret';
 const DEFAULT_CLIENT_ID = ''; // User can supply or enter in settings
 const DRIVE_FOLDER_NAME = 'OS Notes';
 const MOCK_DRIVE_STORAGE_KEY = 'osnotes_mock_google_drive';
@@ -28,6 +29,23 @@ export function saveGoogleClientId(clientId: string): void {
   }
 }
 
+// Helper to get stored Google client Secret (for Desktop OAuth)
+export function getSavedGoogleClientSecret(): string {
+  try {
+    return localStorage.getItem(GOOGLE_CLIENT_SECRET_KEY) || (import.meta as any).env?.VITE_GOOGLE_CLIENT_SECRET || '';
+  } catch {
+    return '';
+  }
+}
+
+export function saveGoogleClientSecret(secret: string): void {
+  try {
+    localStorage.setItem(GOOGLE_CLIENT_SECRET_KEY, secret.trim());
+  } catch (e) {
+    console.error('Error saving Google Client Secret:', e);
+  }
+}
+
 // Helper to get stored Google User
 export function getStoredGoogleUser(): GoogleUser | null {
   try {
@@ -35,7 +53,7 @@ export function getStoredGoogleUser(): GoogleUser | null {
     if (!raw) return null;
     const user = JSON.parse(raw) as GoogleUser;
     // Check if token expired
-    if (user.expiresAt && Date.now() > user.expiresAt && !user.isDemo) {
+    if (user.expiresAt && Date.now() > user.expiresAt && !user.isDemo && !user.refreshToken) {
       return null;
     }
     return user;
@@ -57,12 +75,16 @@ export function saveStoredGoogleUser(user: GoogleUser | null): void {
 }
 
 /**
- * Initializes and requests token using Google Identity Services (GIS)
+ * Initializes and requests token using:
+ * 1. Native Desktop Loopback (RFC 8252) via system browser when running in Electron
+ * 2. Google Identity Services (GIS) when running in Web browser
  */
 export async function signInWithGoogle(
-  customClientId?: string
+  customClientId?: string,
+  customClientSecret?: string
 ): Promise<GoogleUser> {
   const clientId = (customClientId || getSavedGoogleClientId() || DEFAULT_CLIENT_ID).trim();
+  const clientSecret = (customClientSecret || getSavedGoogleClientSecret()).trim();
 
   // If no client ID provided, give simulated demo account for instant test
   if (!clientId) {
@@ -76,6 +98,17 @@ export async function signInWithGoogle(
     };
     saveStoredGoogleUser(demoUser);
     return demoUser;
+  }
+
+  // DESKTOP FLOW: In Electron, open system browser (Safari/Chrome) via loopback server
+  // This fully complies with Google's Secure Response Handling policy (no embedded webviews)
+  if ((window as any).electronAPI?.isDesktop && (window as any).electronAPI?.loginWithGoogleDesktop) {
+    const user = await (window as any).electronAPI.loginWithGoogleDesktop({
+      clientId,
+      clientSecret,
+    });
+    saveStoredGoogleUser(user);
+    return user;
   }
 
   // Load Google Identity Services script if not present
@@ -145,6 +178,29 @@ export const signOutFromGoogle = signOutGoogle;
 // ==========================================
 
 async function driveFetch(endpoint: string, user: GoogleUser, options: RequestInit = {}): Promise<any> {
+  // If token expired, auto-refresh via Electron IPC if available
+  if (
+    user.expiresAt &&
+    Date.now() > user.expiresAt &&
+    user.refreshToken &&
+    (window as any).electronAPI?.refreshGoogleToken
+  ) {
+    try {
+      const refreshed = await (window as any).electronAPI.refreshGoogleToken({
+        clientId: getSavedGoogleClientId(),
+        clientSecret: getSavedGoogleClientSecret(),
+        refreshToken: user.refreshToken,
+      });
+      if (refreshed?.accessToken) {
+        user.accessToken = refreshed.accessToken;
+        user.expiresAt = refreshed.expiresAt;
+        saveStoredGoogleUser(user);
+      }
+    } catch (e) {
+      console.warn('Auto token refresh failed:', e);
+    }
+  }
+
   const headers = {
     Authorization: `Bearer ${user.accessToken}`,
     ...(options.headers || {}),

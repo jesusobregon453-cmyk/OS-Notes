@@ -203,6 +203,7 @@ export interface GoogleUser {
   email: string;
   picture: string;
   accessToken?: string;
+  refreshToken?: string;
   expiresAt?: number;
   isDemo?: boolean;
 }
