@@ -2,6 +2,8 @@
   "name": "os-notes",
   "private": true,
   "version": "1.0.0",
+  "description": "Next-generation digital notebook with vector inking, tape tool, and Google Drive cloud sync",
+  "author": "OS Notes Contributors",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
