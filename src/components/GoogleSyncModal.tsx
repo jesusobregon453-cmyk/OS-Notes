@@ -147,11 +147,22 @@ export const GoogleSyncModal: React.FC<GoogleSyncModalProps> = ({
         {/* Body Content */}
         <div className="p-6 overflow-y-auto space-y-5 text-xs text-slate-700">
           {errorMsg && (
-            <div className="flex items-start space-x-2 p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 animate-in fade-in">
-              <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-              <div className="flex-1 text-[11px]">
-                <p className="font-semibold">Aviso de conexión:</p>
-                <p className="mt-0.5">{errorMsg}</p>
+            <div className="flex items-start space-x-2.5 p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 animate-in fade-in">
+              <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5 text-rose-600" />
+              <div className="flex-1 text-[11px] leading-relaxed">
+                <p className="font-semibold text-rose-800">Aviso de Google Drive:</p>
+                <p className="mt-1">{errorMsg}</p>
+                {(errorMsg.includes('habilitada') || errorMsg.includes('Google Drive API') || errorMsg.includes('disabled')) && (
+                  <a
+                    href="https://console.cloud.google.com/apis/library/drive.googleapis.com?project=1020590166202"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center space-x-1.5 mt-2.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold text-xs shadow-xs transition"
+                  >
+                    <span>Habilitar Google Drive API en Google Cloud</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
               </div>
             </div>
           )}

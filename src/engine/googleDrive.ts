@@ -155,6 +155,26 @@ async function driveFetch(endpoint: string, user: GoogleUser, options: RequestIn
   });
   if (!res.ok) {
     const errorText = await res.text();
+    try {
+      const parsed = JSON.parse(errorText);
+      const errObj = parsed.error;
+      if (errObj) {
+        if (
+          errObj.message?.includes('Google Drive API has not been used') ||
+          errObj.message?.includes('disabled') ||
+          errObj.status === 'PERMISSION_DENIED'
+        ) {
+          throw new Error(
+            'La Google Drive API no está habilitada en tu proyecto de Google Cloud. Por favor habilítala en la consola de Google Cloud para comenzar a sincronizar.'
+          );
+        }
+        throw new Error(errObj.message || `Error de Google Drive API (${res.status})`);
+      }
+    } catch (e: any) {
+      if (e.message && !e.message.startsWith('Unexpected') && !e.message.includes('JSON')) {
+        throw e;
+      }
+    }
     throw new Error(`Google Drive API Error (${res.status}): ${errorText}`);
   }
   if (res.status === 204) return null;
