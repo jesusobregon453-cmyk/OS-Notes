@@ -48,11 +48,23 @@ export const GoogleSyncModal: React.FC<GoogleSyncModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      setClientIdInput(getSavedGoogleClientId());
-      setClientSecretInput(getSavedGoogleClientSecret());
+      const envClientId = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID || '';
+      const envClientSecret = (import.meta as any).env?.VITE_GOOGLE_CLIENT_SECRET || '';
+      const savedId = getSavedGoogleClientId();
+      const savedSecret = getSavedGoogleClientSecret();
+
+      // If on desktop and we have configured desktop credentials in env, prefer them
+      const effectiveId = (isDesktop && envClientId) ? envClientId : (savedId || envClientId);
+      const effectiveSecret = (isDesktop && envClientSecret) ? envClientSecret : (savedSecret || envClientSecret);
+
+      setClientIdInput(effectiveId);
+      setClientSecretInput(effectiveSecret);
+      if (effectiveId) saveGoogleClientId(effectiveId);
+      if (effectiveSecret) saveGoogleClientSecret(effectiveSecret);
+
       setErrorMsg(null);
     }
-  }, [isOpen]);
+  }, [isOpen, isDesktop]);
 
   if (!isOpen) return null;
 
